@@ -9,9 +9,10 @@ data class GattProfile(
 )
 
 enum class DeviceCapability { INPUT_TEST, KRLY_CONFIGURATION, BATTERY_QUERY, CALIBRATION, FIRMWARE_INFO, MACROS, TURBO,
-    STICK_TUNING, TRIGGER_TUNING, VIBRATION_CONFIGURATION, REAR_BUTTONS, X10_ART }
+    STICK_TUNING, TRIGGER_TUNING, VIBRATION_CONFIGURATION, REAR_BUTTONS, X10_ART, KEYLINKER_CONFIGURATION }
 
-enum class ConfigurationProtocol { KRLY }
+/** KRLY: EasySMX X10 (QMacro). KEYLINKER: EasySMX X20 / X20 Pro (KeyLinker app). Never mixed on one link. */
+enum class ConfigurationProtocol { KRLY, KEYLINKER }
 
 data class DeviceProfile(val id: String, val name: String, val gatt: GattProfile,
     val capabilities: Set<DeviceCapability> = setOf(DeviceCapability.INPUT_TEST),
@@ -24,7 +25,21 @@ data class DeviceProfile(val id: String, val name: String, val gatt: GattProfile
             DeviceCapability.STICK_TUNING, DeviceCapability.TRIGGER_TUNING, DeviceCapability.VIBRATION_CONFIGURATION,
             DeviceCapability.REAR_BUTTONS, DeviceCapability.X10_ART),
             ConfigurationProtocol.KRLY, listOf(PadKey.M1, PadKey.M2))
-        fun find(id: String?) = X10.takeIf { it.id == id }
+        /** KeyLinker GATT service, write and notify characteristics (X20CTL protocol.py). */
+        val KEYLINKER_GATT = GattProfile(
+            "d7f010e0-660d-46e9-96c3-19c4148bdab5",
+            "d7f010e1-660d-46e9-96c3-19c4148bdab5",
+            "d7f010e2-660d-46e9-96c3-19c4148bdab5")
+        private val KEYLINKER_CAPABILITIES = setOf(DeviceCapability.INPUT_TEST, DeviceCapability.KEYLINKER_CONFIGURATION,
+            DeviceCapability.BATTERY_QUERY, DeviceCapability.FIRMWARE_INFO, DeviceCapability.MACROS,
+            DeviceCapability.STICK_TUNING, DeviceCapability.TRIGGER_TUNING, DeviceCapability.VIBRATION_CONFIGURATION,
+            DeviceCapability.REAR_BUTTONS)
+        val X20 = DeviceProfile("easysmx-x20", "EasySMX X20", KEYLINKER_GATT, KEYLINKER_CAPABILITIES,
+            ConfigurationProtocol.KEYLINKER, listOf(PadKey.M1, PadKey.M2, PadKey.M3, PadKey.M4))
+        val X20_PRO = DeviceProfile("easysmx-x20-pro", "EasySMX X20 Pro", KEYLINKER_GATT, KEYLINKER_CAPABILITIES + DeviceCapability.TURBO,
+            ConfigurationProtocol.KEYLINKER, listOf(PadKey.M1, PadKey.M2, PadKey.M3, PadKey.M4, PadKey.M5, PadKey.M6))
+        val ALL = listOf(X10, X20, X20_PRO)
+        fun find(id: String?) = ALL.firstOrNull { it.id == id }
     }
 }
 
@@ -34,7 +49,7 @@ enum class PadKey(val code: Int, val label: String) {
     RB(167, "RB"), RT(168, "RT"), RS(169, "R3"),
     SELECT(170, "View −"), START(171, "Menu +"),
     UP(211, "↑"), DOWN(212, "↓"), LEFT(209, "←"), RIGHT(210, "→"),
-    M1(1, "M1"), M2(2, "M2"), M3(3, "M3"), M4(4, "M4");
+    M1(1, "M1"), M2(2, "M2"), M3(3, "M3"), M4(4, "M4"), M5(5, "M5"), M6(6, "M6");
     companion object {
         fun from(code: Int) = entries.firstOrNull { it.code == code }
         val outputs get() = entries.filter { it.code >= 160 }

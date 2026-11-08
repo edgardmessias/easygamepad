@@ -28,8 +28,9 @@ controller settings.
 
 Requires **Android 8.0 or later**. Generic Bluetooth and USB gamepads can use the
 input tester when Android exposes their inputs. Advanced configuration currently
-supports the **EasySMX X10**; other EasySMX models and KeyLinker controllers do
-not automatically share that support.
+supports the **EasySMX X10**. The **EasySMX X20** and **X20 Pro** are identified and
+their settings read and changed over KeyLinker, each change confirmed by reading it back (see [KeyLinker protocol](docs/keylinker.md)).
+Other EasySMX models do not automatically share that support.
 
 1. Install an EasyGamepad APK, or [build it from source](CONTRIBUTING.md#build-and-install).
 2. Connect your controller to Android through Bluetooth or USB for input testing.

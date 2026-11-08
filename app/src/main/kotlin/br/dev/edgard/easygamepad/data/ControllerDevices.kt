@@ -6,6 +6,7 @@ import br.dev.edgard.easygamepad.input.InputPad
 import br.dev.edgard.easygamepad.protocol.DeviceProfile
 import br.dev.edgard.easygamepad.protocol.GattProfile
 import br.dev.edgard.easygamepad.protocol.DeviceCapability
+import br.dev.edgard.easygamepad.protocol.ConfigurationProtocol
 
 data class SavedController(
     val address: String,
@@ -31,8 +32,18 @@ data class ControllerDevice(
     val profile get() = DeviceProfile.find(modelId)
     val capabilities get() = profile?.capabilities ?: setOf(DeviceCapability.INPUT_TEST)
     fun supports(capability: DeviceCapability) = capability in capabilities
+    /** KRLY (QMacro) configuration: the X10 profile editor, tools and Apply. */
     val supportsConfiguration get() = supports(DeviceCapability.KRLY_CONFIGURATION)
+    /** KeyLinker configuration: X20 / X20 Pro identification and read-only settings. */
+    val supportsKeyLinker get() = supports(DeviceCapability.KEYLINKER_CONFIGURATION)
+    /** Has a separate BLE configuration link the app may open after the user chose it. */
+    val hasConfigurationLink get() = supportsConfiguration || supportsKeyLinker
+    val configurationProtocol: ConfigurationProtocol? get() = profile?.configurationProtocol
     val usesX10Art get() = supports(DeviceCapability.X10_ART)
+    /** Genuine product artwork for this model, or null for the generic drawing. */
+    val artwork get() = ControllerArtworkCatalog.forModel(modelId)
+    /** Product name for the subtitle when the user renamed the controller. */
+    val productName get() = profile?.name
     val rearButtons get() = profile?.rearButtons.orEmpty()
     val shortId get() = address?.takeLast(5) ?: inputId?.let { "#$it" }.orEmpty()
 }

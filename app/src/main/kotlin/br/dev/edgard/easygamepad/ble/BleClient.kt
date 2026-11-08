@@ -25,7 +25,9 @@ import br.dev.edgard.easygamepad.BuildConfig
 import kotlin.coroutines.resume
 
 enum class LinkPhase { DISCONNECTED, CONNECTING, DISCOVERING, SUBSCRIBING, READY }
-data class LinkState(val phase: LinkPhase = LinkPhase.DISCONNECTED, val address: String? = null, val name: String? = null, val error: String? = null)
+data class LinkState(val phase: LinkPhase = LinkPhase.DISCONNECTED, val address: String? = null, val name: String? = null, val error: String? = null,
+    /** Which configuration protocol this link was opened for. Only that protocol's driver may talk on it. */
+    val protocol: ConfigurationProtocol = ConfigurationProtocol.KRLY)
 data class FoundDevice(val address: String, val name: String, val rssi: Int? = null, val bonded: Boolean = false, val candidate: Boolean = false)
 data class BleLog(val time: Long = System.currentTimeMillis(), val direction: String, val message: String)
 
@@ -47,6 +49,8 @@ class BleClient(private val context: Context, private val scope: CoroutineScope)
     override val notifications = incoming.asSharedFlow()
     private var gatt: BluetoothGatt? = null
     private var profile = GattProfile()
+    private var linkProtocol = ConfigurationProtocol.KRLY
+    private var linkName = "EasySMX X10"
     private var writeCharacteristic: BluetoothGattCharacteristic? = null
     private var scanJob: Job? = null
     private var connectTimeout: Job? = null
@@ -93,7 +97,7 @@ class BleClient(private val context: Context, private val scope: CoroutineScope)
         } catch (error: Exception) { mutableScanning.value = false; throw error }
         scanJob = scope.launch { delay(12000); stopScan() }
     }
-    private fun candidate(name: String?) = listOf("x10", "easysmx", "qmacro", "xbox", "smx").any { name?.contains(it, true) == true }
+    private fun candidate(name: String?) = listOf("x10", "x20", "easysmx", "qmacro", "keylinker", "xbox", "smx").any { name?.contains(it, true) == true }
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             observed[result.device.address] = result.device to android.os.SystemClock.elapsedRealtime()
@@ -114,12 +118,17 @@ class BleClient(private val context: Context, private val scope: CoroutineScope)
         mutableScanning.value = false
     }
 
-    fun connect(address: String, selectedProfile: GattProfile) {
+    /**
+     * Opens the configuration link the user chose. [protocol] decides which driver may use it;
+     * nothing on the link is sent by BleClient itself beyond the GATT subscription.
+     */
+    fun connect(address: String, selectedProfile: GattProfile, protocol: ConfigurationProtocol = ConfigurationProtocol.KRLY,
+        displayName: String = "EasySMX X10") {
         check(hasPermissions() && enabled()) { "Bluetooth unavailable or permission missing" }
         require(BluetoothAdapter.checkBluetoothAddress(address)) { "Invalid Bluetooth address" }
         listOf(selectedProfile.service, selectedProfile.write, selectedProfile.notify).forEach { UUID.fromString(it) }
-        disconnect(); stopScan(); profile = selectedProfile
-        mutableLink.value = LinkState(LinkPhase.CONNECTING, address, "EasySMX X10")
+        disconnect(); stopScan(); profile = selectedProfile; linkProtocol = protocol; linkName = displayName
+        mutableLink.value = LinkState(LinkPhase.CONNECTING, address, displayName, protocol = protocol)
         log("LINK", "Looking for configuration channel $address")
         discoveryJob = scope.launch {
             try {
@@ -127,7 +136,7 @@ class BleClient(private val context: Context, private val scope: CoroutineScope)
                 val discovered = recent ?: discoverConfiguration(address)
                 val device = discovered ?: requireNotNull(adapter).getRemoteDevice(address)
                 ensureActive()
-                mutableLink.update { it.copy(name = device.name ?: "EasySMX X10") }
+                mutableLink.update { it.copy(name = device.name ?: displayName) }
                 log("LINK", "Connecting to $address · ${device.name} · type ${device.type}")
                 // Keep the BLE device returned by discovery, including its address type.
                 startGatt(device)
@@ -143,7 +152,8 @@ class BleClient(private val context: Context, private val scope: CoroutineScope)
         connectTimeout = scope.launch {
             delay(18000)
             if (link.value.phase != LinkPhase.READY)
-                fail("QMacro did not respond. Gameplay may still work. Disconnect configuration apps on other phones, then try again.")
+                fail(if (linkProtocol == ConfigurationProtocol.KRLY) "QMacro did not respond. Gameplay may still work. Disconnect configuration apps on other phones, then try again."
+                    else "The configuration channel did not respond. Gameplay may still work. Close the KeyLinker app and configuration apps on other phones, then try again.")
         }
     }
 
@@ -195,7 +205,8 @@ class BleClient(private val context: Context, private val scope: CoroutineScope)
             val notifier = service?.getCharacteristic(UUID.fromString(profile.notify))
             log("GATT", connection.services.joinToString { it.uuid.toString() })
             if (writer == null || notifier == null || writer.properties and (BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) == 0) {
-                fail("X10 configuration service not found. The gameplay connection may use a different BLE address. Check the device and advanced UUIDs."); return
+                fail(if (linkProtocol == ConfigurationProtocol.KRLY) "X10 configuration service not found. The gameplay connection may use a different BLE address. Check the device and advanced UUIDs."
+                    else "$linkName configuration service (KeyLinker) not found on this device. Nothing was sent."); return
             }
             val descriptor = notifier.getDescriptor(cccd)
             val notifyValue = when {

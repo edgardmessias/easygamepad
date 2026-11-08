@@ -32,8 +32,9 @@ class ControllerRepository(val ble: BleClient, private val scope: CoroutineScope
 
     init {
         scope.launch {
-            ble.link.map { it.phase }.distinctUntilChanged().collect { phase ->
-                if (phase == LinkPhase.READY) {
+            // KRLY commands go only to links opened for the X10 (QMacro). A KeyLinker link is never polled here.
+            ble.link.map { it.phase == LinkPhase.READY && it.protocol == ConfigurationProtocol.KRLY }.distinctUntilChanged().collect { krlyReady ->
+                if (krlyReady) {
                     val active = CommandSession(ble, scope)
                     session = active
                     eventsJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {

@@ -41,6 +41,36 @@ in the upstream project:
 space, together with the native PNGs. Compose integration lives in
 `app/.../ui/ControllerArt.kt` under the same GPL-3.0-or-later header.
 
+## x20ctl — EasySMX X20 and X20 Pro images, geometry and KeyLinker protocol
+
+- Imported revision: `aac546147aed3a8fb11abe3ff1c67e3e173dcaf3` (2026-11-07)
+- Same project, copyright and license as above (GPL-3.0-or-later).
+
+Unmodified PNG copies (byte-identical, 1536×1024):
+
+| Upstream file | Path in EasyGamepad |
+| --- | --- |
+| `src/assets/controllers/x20/native/front-body.png` | `app/src/main/res/drawable-nodpi/x20_front_body.png` |
+| `src/assets/controllers/x20/native/rear-full.png` | `app/src/main/res/drawable-nodpi/x20_rear.png` |
+| `src/assets/controllers/x20/native/stick-l.png` | `app/src/main/res/drawable-nodpi/x20_stick_left.png` |
+| `src/assets/controllers/x20/native/stick-r.png` | `app/src/main/res/drawable-nodpi/x20_stick_right.png` |
+| `src/assets/controllers/x20_pro/native/front-body.png` | `app/src/main/res/drawable-nodpi/x20pro_front_body.png` |
+| `src/assets/controllers/x20_pro/native/rear-full.png` | `app/src/main/res/drawable-nodpi/x20pro_rear.png` |
+| `src/assets/controllers/x20_pro/native/stick-l.png` | `app/src/main/res/drawable-nodpi/x20pro_stick_left.png` |
+| `src/assets/controllers/x20_pro/native/stick-r.png` | `app/src/main/res/drawable-nodpi/x20pro_stick_right.png` |
+
+`app/src/main/assets/controllers/x20-layout.json` and `x20-pro-layout.json` are built
+exactly like the X10 file: `{ sourceSize, shapes: control-shapes.json models.<model>,
+layers: native-layers.json models.<model> }`, with no edits to the values.
+
+The KeyLinker protocol code in `protocol/src/main/kotlin/.../protocol/keylinker/`
+(framing, CRC-8, scrambling, record decoders, request classification and the
+hardware-evidence table) is a Kotlin port of x20ctl's `x20ctl/protocol.py`,
+`x20ctl/client.py`, `x20ctl/validation.py` and the `desktop-dotnet` KeyLinker
+codec at the revision above. Byte-level test vectors in
+`protocol/src/test/kotlin/.../keylinker/` were produced by running that upstream
+code. See [docs/keylinker.md](docs/keylinker.md).
+
 When redistributing these materials or an app that embeds them, preserve notices,
 license text, and provide corresponding source as required by the GPL.
 

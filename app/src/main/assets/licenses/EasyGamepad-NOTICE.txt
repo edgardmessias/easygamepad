@@ -9,7 +9,8 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY
 WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
 PARTICULAR PURPOSE. See LICENSE for the full text.
 
-X10 images and button geometry originate from x20ctl.
+X10, X20 and X20 Pro images and button geometry, and the KeyLinker protocol
+port, originate from x20ctl.
 Copyright (C) 2026 Amjad AAYD. GPL-3.0-or-later.
 Preserved original notices: licenses/x20ctl-NOTICE.txt.
 File provenance and third-party terms: THIRD_PARTY.md.
