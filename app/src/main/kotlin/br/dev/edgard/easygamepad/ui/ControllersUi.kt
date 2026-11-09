@@ -19,16 +19,20 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import br.dev.edgard.easygamepad.HubViewModel
 import br.dev.edgard.easygamepad.ble.LinkPhase
 import br.dev.edgard.easygamepad.data.ControllerDevice
+import br.dev.edgard.easygamepad.data.ControllerArtworkCatalog
 import br.dev.edgard.easygamepad.data.controllerName
+import br.dev.edgard.easygamepad.protocol.DeviceProfile
 
 @Composable fun ControllerChoiceCard(device: ControllerDevice, selected: Boolean, ready: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
     Surface(onClick = onClick, enabled = enabled, shape = RoundedCornerShape(20.dp), color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant), modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(17.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            HubIcon(Glyph.TEST, Modifier.size(28.dp), if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+            val art = device.artwork
+            if (art != null) ArtworkThumbnail(art, Modifier.width(64.dp).height(44.dp))
+            else HubIcon(Glyph.TEST, Modifier.size(28.dp), if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(device.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text((if (device.isX10 && device.name != "EasySMX X10") "EasySMX X10 · " else "") + device.shortId,
+                Text((device.productName?.takeIf { it != device.name }?.let { "$it · " } ?: "") + device.shortId,
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(when {
                     ready && device.inputId != null -> tr("Ready to play and customize", "Pronto para jogar e personalizar")
@@ -63,15 +67,21 @@ import br.dev.edgard.easygamepad.data.controllerName
                 Text(tr("Rename", "Renomear") + " · " + device.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        if (devices.isEmpty()) Description(tr("Pair a gamepad in Android settings or add an X10 configuration connection.", "Pareie um controle nos ajustes do Android ou adicione a conexão de configuração de um X10."))
-        Button(onClick = { model.addX10() }, enabled = canSwitch, modifier = Modifier.fillMaxWidth()) {
-            HubIcon(Glyph.PLUS, Modifier.size(18.dp), MaterialTheme.colorScheme.onPrimary)
-            Spacer(Modifier.width(8.dp)); Text(tr("Add EasySMX X10", "Adicionar EasySMX X10"))
+        if (devices.isEmpty()) Description(tr("Pair a gamepad in Android settings or add an EasySMX configuration connection.", "Pareie um controle nos ajustes do Android ou adicione a conexão de configuração de um EasySMX."))
+        Text(tr("Add an EasySMX controller", "Adicionar controle EasySMX"), style = MaterialTheme.typography.titleMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            DeviceProfile.ALL.forEach { profile ->
+                ModelChoice(profile, Modifier.weight(1f), canSwitch) { model.addController(profile) }
+            }
         }
-        if (selected?.isX10 == true && selected?.address != null) {
+        Description(tr("X10, X20 and X20 Pro settings can be changed. X20 and X20 Pro changes are read back to confirm them.",
+            "Os ajustes do X10, X20 e X20 Pro podem ser alterados. No X20 e X20 Pro, cada alteração é relida para confirmar."))
+        if (selected?.hasConfigurationLink == true && selected?.address != null) {
             HorizontalDivider()
             Text(tr("Which controller do you want to test?", "Qual controle você quer testar?"), style = MaterialTheme.typography.titleMedium)
-            Description(tr("Your X10 may appear as Xbox Wireless Controller in Android. If you have more than one, choose the one that matches this X10.", "Seu X10 pode aparecer como Xbox Wireless Controller no Android. Se houver mais de um, escolha o que corresponde a este X10."))
+            val product = selected?.productName ?: "EasySMX X10"
+            Description(tr("Your $product may appear under another name in Android, such as Xbox Wireless Controller. If you have more than one, choose the one that matches this controller.",
+                "Seu $product pode aparecer com outro nome no Android, como Xbox Wireless Controller. Se houver mais de um, escolha o que corresponde a este controle."))
             input.pads.forEach { pad ->
                 Surface(onClick = { model.linkGameplay(pad.id) }, enabled = canSwitch, shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
                     Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -85,8 +95,12 @@ import br.dev.edgard.easygamepad.data.controllerName
             }
             if (selected?.inputDescriptor != null) TextButton(onClick = { model.linkGameplay(null) }, enabled = canSwitch) { Text(tr("Remove test connection", "Desvincular controle do teste")) }
         }
-        if (selected != null && selected?.isX10 == false) {
-            TextButton(onClick = { model.addX10(fromSelectedInput = true) }, enabled = canSwitch) { Text(tr("This controller is an EasySMX X10", "Este controle é um EasySMX X10")) }
+        if (selected != null && selected?.address == null && selected?.inputId != null) {
+            DeviceProfile.ALL.forEach { profile ->
+                TextButton(onClick = { model.addController(profile, fromSelectedInput = true) }, enabled = canSwitch) {
+                    Text(tr("This controller is an ${profile.name}", "Este controle é um ${profile.name}"))
+                }
+            }
         }
     }
     renaming?.let { device -> RenameControllerDialog(device, { renaming = null }) { name ->
@@ -117,10 +131,24 @@ import br.dev.edgard.easygamepad.data.controllerName
         HubCard(Modifier.fillMaxWidth()) {
             HubIcon(Glyph.PROFILES, Modifier.size(34.dp), MaterialTheme.colorScheme.secondary)
             Text(tr("Device-specific settings", "Ajustes por dispositivo"), style = MaterialTheme.typography.titleLarge)
-            Description(tr("You can customize the EasySMX X10 in this app. With other controllers, you can check buttons, sticks and triggers in Test.", "Você pode personalizar o EasySMX X10 neste app. Com outros controles, confira botões, analógicos e gatilhos na aba Teste."))
+            Description(tr("You can customize the EasySMX X10, X20 and X20 Pro in this app. With other controllers, you can check buttons, sticks and triggers in Test.",
+                "Você pode personalizar o EasySMX X10, X20 e X20 Pro neste app. Com outros controles, confira botões, analógicos e gatilhos na aba Teste."))
             Button(onClick = { model.tab.value = 2 }, enabled = device?.inputId != null) { Text(tr("Test selected controller", "Testar controle selecionado")) }
             OutlinedButton(onClick = { model.deviceSheet.value = true }) { Text(tr("Choose controller", "Escolher controle")) }
-            if (device?.isX10 == false) TextButton(onClick = { model.addX10(true) }) { Text(tr("Set up as EasySMX X10", "Configurar como EasySMX X10")) }
+            if (device != null && device?.address == null) DeviceProfile.ALL.forEach { profile ->
+                TextButton(onClick = { model.addController(profile, true) }) { Text(tr("Set up as ${profile.name}", "Configurar como ${profile.name}")) }
+            }
+        }
+    }
+}
+
+/** A model tile with the product's own photograph, or the drawn generic gamepad. */
+@Composable private fun ModelChoice(profile: DeviceProfile, modifier: Modifier, enabled: Boolean, onClick: () -> Unit) {
+    Surface(onClick = onClick, enabled = enabled, modifier = modifier, shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+        Column(Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            ArtworkThumbnail(ControllerArtworkCatalog.forModel(profile.id), Modifier.fillMaxWidth().heightIn(max = 110.dp).aspectRatio(1.5f, matchHeightConstraintsFirst = true))
+            Text(profile.name.removePrefix("EasySMX "), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }

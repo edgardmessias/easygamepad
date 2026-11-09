@@ -55,7 +55,7 @@ class GamepadInput(context: Context) : InputManager.InputDeviceListener {
     fun reset() = sessions.reset()
     fun clearPressed() = sessions.clearPressed()
     fun identifyPaddle(paddle: PadKey?) {
-        require(paddle == null || paddle.code in 1..4)
+        require(paddle == null || paddle.code in 1..6)
         state.value.selectedId?.let { sessions.update(it, state.value.copy(learningPaddle = paddle, pressed = emptySet())) }
     }
     fun key(event: KeyEvent): Boolean {

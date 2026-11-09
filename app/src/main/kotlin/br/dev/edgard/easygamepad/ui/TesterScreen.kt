@@ -40,56 +40,7 @@ import java.util.Locale
         KeyEvent.KEYCODE_BUTTON_THUMBL to "L3", KeyEvent.KEYCODE_BUTTON_THUMBR to "R3", KeyEvent.KEYCODE_BUTTON_SELECT to "View", KeyEvent.KEYCODE_BUTTON_START to "Menu",
         KeyEvent.KEYCODE_DPAD_UP to "↑", KeyEvent.KEYCODE_DPAD_DOWN to "↓", KeyEvent.KEYCODE_DPAD_LEFT to "←", KeyEvent.KEYCODE_DPAD_RIGHT to "→")
     val hasInput = state.selectedId != null
-    ScreenColumn {
-        ScreenHeading(tr("Live controller", "Controle ao vivo"), tr("Every move, on screen.", "Cada movimento na tela."))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatusPill(if (hasInput) tr("Game connected", "Jogo conectado") else tr("Waiting for controller", "Aguardando controle"), hasInput)
-            StatusPill(tr("${state.tested.size} buttons tested", "${state.tested.size} botões testados"), state.tested.isNotEmpty(), color = MaterialTheme.colorScheme.secondary)
-        }
-        if (!hasInput) {
-            InfoBanner(tr("Turn on your controller and connect it through Bluetooth or USB. Then choose it below to start testing.", "Ligue o controle e conecte por Bluetooth ou USB. Depois, escolha abaixo para começar o teste."))
-            OutlinedButton(onClick = { model.deviceSheet.value = true }) { Text(tr("Choose controller to test", "Escolher controle para testar")) }
-            state.pads.forEach { pad ->
-                OutlinedButton(onClick = {
-                    if (controller?.address != null) model.linkGameplay(pad.id)
-                    else devices.firstOrNull { it.inputId == pad.id }?.let(model::chooseDevice)
-                }, modifier = Modifier.fillMaxWidth()) {
-                    Text(tr("Use ", "Usar ") + (devices.firstOrNull { it.inputId == pad.id }?.name ?: pad.name) + " · #${pad.id}")
-                }
-            }
-        }
-        HubCard(Modifier.fillMaxWidth()) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(controller?.name ?: tr("Controller preview", "Visual do controle"), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                TextButton(onClick = { model.app.input.reset() }, enabled = hasInput) { Text(tr("Clear", "Limpar")) }
-            }
-            if (controller?.usesX10Art == true) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = !rear, onClick = { rear = false }, label = { Text(tr("Front", "Frente")) })
-                FilterChip(selected = rear, onClick = { rear = true }, label = { Text(tr("Rear paddles", "Botões traseiros")) })
-            }
-            ControllerStage(Modifier.fillMaxWidth().height(185.dp), controller?.usesX10Art == true, state, rear)
-            Description(tr("Press a button or move a stick to see it light up.", "Pressione um botão ou mova um analógico para ver a resposta."))
-        }
-        if (controller?.rearButtons?.isNotEmpty() == true && rear) HubCard(Modifier.fillMaxWidth()) {
-            Text(tr("Identify rear paddles", "Identificar botões traseiros"), style = MaterialTheme.typography.titleMedium)
-            Description(tr("Choose M1 or M2, then press that rear button. The app will remember its function until you clear this test.",
-                "Escolha M1 ou M2 e pressione esse botão traseiro. O app lembra a função dele até você limpar este teste."))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                controller?.rearButtons.orEmpty().forEach { paddle ->
-                    val code = state.paddleBindings[paddle]
-                    FilterChip(selected = state.learningPaddle == paddle || code in state.pressed,
-                        enabled = hasInput,
-                        onClick = { rear = true; model.app.input.identifyPaddle(paddle) },
-                        label = { Text(paddle.label + (code?.let { " · " + KeyEvent.keyCodeToString(it).removePrefix("KEYCODE_").removePrefix("BUTTON_") } ?: " +")) })
-                }
-            }
-            state.learningPaddle?.let { paddle ->
-                Text(tr("Press ", "Pressione ") + paddle.label + tr(" now…", " agora…"), color = MaterialTheme.colorScheme.primary)
-                TextButton(onClick = { model.app.input.identifyPaddle(null) }) { Text(tr("Cancel identification", "Cancelar identificação")) }
-            }
-            Description(tr("If M1 repeats A, both light up together. This identifies the button for testing and keeps its current function.",
-                "Se M1 repete A, os dois acendem juntos. A identificação serve para o teste e mantém a função atual do botão."))
-        }
+    AdaptivePanes(secondary = {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             StickPlot(tr("Left stick", "Analógico esquerdo"), state.axes[MotionEvent.AXIS_X] ?: 0f, state.axes[MotionEvent.AXIS_Y] ?: 0f, state.samples, Modifier.weight(1f))
             StickPlot(tr("Right stick", "Analógico direito"), state.axes[MotionEvent.AXIS_Z] ?: state.axes[MotionEvent.AXIS_RX] ?: 0f, state.axes[MotionEvent.AXIS_RZ] ?: state.axes[MotionEvent.AXIS_RY] ?: 0f, state.rightSamples, Modifier.weight(1f))
@@ -129,6 +80,57 @@ import java.util.Locale
             Description(tr("Values are shown without a software dead zone so you can inspect drift. The tester does not inject or remap inputs in other apps.", "Valores exibidos sem zona morta por software para inspecionar drift. O teste não injeta nem remapeia entradas em outros apps."))
         }
         if (details) state.pads.firstOrNull { it.id == state.selectedId }?.let { pad -> Mono("VID %04X  ·  PID %04X".format(pad.vendor, pad.product)) }
+    }) {
+        ScreenHeading(tr("Live controller", "Controle ao vivo"), tr("Every move, on screen.", "Cada movimento na tela."))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatusPill(if (hasInput) tr("Game connected", "Jogo conectado") else tr("Waiting for controller", "Aguardando controle"), hasInput)
+            StatusPill(tr("${state.tested.size} buttons tested", "${state.tested.size} botões testados"), state.tested.isNotEmpty(), color = MaterialTheme.colorScheme.secondary)
+        }
+        if (!hasInput) {
+            InfoBanner(tr("Turn on your controller and connect it through Bluetooth or USB. Then choose it below to start testing.", "Ligue o controle e conecte por Bluetooth ou USB. Depois, escolha abaixo para começar o teste."))
+            OutlinedButton(onClick = { model.deviceSheet.value = true }) { Text(tr("Choose controller to test", "Escolher controle para testar")) }
+            state.pads.forEach { pad ->
+                OutlinedButton(onClick = {
+                    if (controller?.address != null) model.linkGameplay(pad.id)
+                    else devices.firstOrNull { it.inputId == pad.id }?.let(model::chooseDevice)
+                }, modifier = Modifier.fillMaxWidth()) {
+                    Text(tr("Use ", "Usar ") + (devices.firstOrNull { it.inputId == pad.id }?.name ?: pad.name) + " · #${pad.id}")
+                }
+            }
+        }
+        HubCard(Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(controller?.name ?: tr("Controller preview", "Visual do controle"), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                TextButton(onClick = { model.app.input.reset() }, enabled = hasInput) { Text(tr("Clear", "Limpar")) }
+            }
+            if (controller?.artwork != null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = !rear, onClick = { rear = false }, label = { Text(tr("Front", "Frente")) })
+                FilterChip(selected = rear, onClick = { rear = true }, label = { Text(tr("Rear paddles", "Botões traseiros")) })
+            }
+            ControllerStage(Modifier.fillMaxWidth().height(LocalWindowLayout.current.stageHeight(185.dp)), controller?.artwork, state, rear)
+            Description(tr("Press a button or move a stick to see it light up.", "Pressione um botão ou mova um analógico para ver a resposta."))
+        }
+        if (controller?.rearButtons?.isNotEmpty() == true && rear) HubCard(Modifier.fillMaxWidth()) {
+            Text(tr("Identify rear paddles", "Identificar botões traseiros"), style = MaterialTheme.typography.titleMedium)
+            val paddles = controller?.rearButtons.orEmpty().joinToString(", ") { it.label }
+            Description(tr("Choose a rear button ($paddles), then press it. The app will remember its function until you clear this test.",
+                "Escolha um botão traseiro ($paddles) e pressione. O app lembra a função dele até você limpar este teste."))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                controller?.rearButtons.orEmpty().forEach { paddle ->
+                    val code = state.paddleBindings[paddle]
+                    FilterChip(selected = state.learningPaddle == paddle || code in state.pressed,
+                        enabled = hasInput,
+                        onClick = { rear = true; model.app.input.identifyPaddle(paddle) },
+                        label = { Text(paddle.label + (code?.let { " · " + KeyEvent.keyCodeToString(it).removePrefix("KEYCODE_").removePrefix("BUTTON_") } ?: " +")) })
+                }
+            }
+            state.learningPaddle?.let { paddle ->
+                Text(tr("Press ", "Pressione ") + paddle.label + tr(" now…", " agora…"), color = MaterialTheme.colorScheme.primary)
+                TextButton(onClick = { model.app.input.identifyPaddle(null) }) { Text(tr("Cancel identification", "Cancelar identificação")) }
+            }
+            Description(tr("If M1 repeats A, both light up together. This identifies the button for testing and keeps its current function.",
+                "Se M1 repete A, os dois acendem juntos. A identificação serve para o teste e mantém a função atual do botão."))
+        }
     }
 }
 internal fun triggerAxis(state: InputState, primary: Int, fallback: Int, key: Int): Float {

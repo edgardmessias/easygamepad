@@ -12,19 +12,24 @@ data class ControllerStatus(
     val connecting: Boolean,
     val batteryPercent: Int?,
     val charging: Boolean,
+    /** KeyLinker reports a four-step gauge (1..4), never a percentage. */
+    val batteryLevel: Int? = null,
 ) {
     val connected get() = gameplayConnected || configurationConnected
 }
 
-fun controllerStatus(device: ControllerDevice?, link: LinkState, hardware: HardwareState): ControllerStatus {
+fun controllerStatus(device: ControllerDevice?, link: LinkState, hardware: HardwareState,
+    keyLinker: KeyLinkerState = KeyLinkerState()): ControllerStatus {
     val selectedLink = device?.address != null && device.address == link.address
     val ready = selectedLink && link.phase == LinkPhase.READY
     val battery = hardware.battery.takeIf { ready }
+    val gauge = keyLinker.battery.takeIf { ready && keyLinker.address == device?.address }
     return ControllerStatus(
         gameplayConnected = device?.inputId != null,
         configurationConnected = ready,
         connecting = selectedLink && link.phase !in listOf(LinkPhase.READY, LinkPhase.DISCONNECTED),
         batteryPercent = battery?.percent ?: device?.inputBatteryPercent.takeIf { device?.inputId != null },
-        charging = battery?.charging ?: (device?.inputBatteryCharging == true && device.inputId != null),
+        charging = battery?.charging ?: gauge?.charging ?: (device?.inputBatteryCharging == true && device.inputId != null),
+        batteryLevel = gauge?.level,
     )
 }

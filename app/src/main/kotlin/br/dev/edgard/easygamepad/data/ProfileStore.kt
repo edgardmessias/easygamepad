@@ -63,23 +63,42 @@ class ProfileStore(context: Context) {
         return language
     }
     suspend fun theme(theme: String) { require(theme in listOf("dark", "light", "system")); store.edit { it[stringPreferencesKey("theme")] = theme } }
-    suspend fun device(address: String, gatt: GattProfile, inputDescriptor: String? = null) { store.edit {
+    /**
+     * Remembers a verified configuration address. [modelId] is stored in the existing `controllers`
+     * JSON `model` field. The legacy single-controller keys (`service`, `write`, `notify`) keep
+     * describing the X10/KRLY channel only, so a KeyLinker controller never overwrites them.
+     */
+    suspend fun device(address: String, gatt: GattProfile, inputDescriptor: String? = null, modelId: String? = null) { store.edit {
         val previousAddress = it[stringPreferencesKey("address")].orEmpty()
         val saved = it[stringPreferencesKey("controllers")]?.let(::decodeControllers)
             ?: if (previousAddress.isNotBlank()) listOf(SavedController(previousAddress)) else emptyList()
         if (address.isNotBlank()) {
             val old = saved.firstOrNull { row -> row.address == address }
-            val controller = (old ?: SavedController(address)).copy(gatt = gatt,
-                inputDescriptor = inputDescriptor ?: old?.inputDescriptor)
+            val model = DeviceProfile.find(modelId ?: old?.modelId) ?: DeviceProfile.X10
+            val controller = (old ?: SavedController(address, name = model.name, modelId = model.id)).copy(gatt = gatt,
+                inputDescriptor = inputDescriptor ?: old?.inputDescriptor, modelId = model.id)
             val remaining = saved.filterNot { row -> row.address == address }.map { row ->
                 if (inputDescriptor != null && row.inputDescriptor == inputDescriptor) row.copy(inputDescriptor = null) else row
             }
             it[stringPreferencesKey("controllers")] = encodeControllers(remaining + controller)
         }
         it[stringPreferencesKey("address")] = address
-        it[stringPreferencesKey("service")] = gatt.service
-        it[stringPreferencesKey("write")] = gatt.write
-        it[stringPreferencesKey("notify")] = gatt.notify
+        val krly = DeviceProfile.find(modelId)?.configurationProtocol != ConfigurationProtocol.KEYLINKER
+        if (krly) {
+            it[stringPreferencesKey("service")] = gatt.service
+            it[stringPreferencesKey("write")] = gatt.write
+            it[stringPreferencesKey("notify")] = gatt.notify
+        }
+    } }
+    /** Corrects the saved model after the controller identified itself, on the user's request. */
+    suspend fun model(address: String, modelId: String) { store.edit { values ->
+        val model = requireNotNull(DeviceProfile.find(modelId))
+        val rows = values[stringPreferencesKey("controllers")]?.let(::decodeControllers).orEmpty()
+        require(rows.any { it.address == address })
+        values[stringPreferencesKey("controllers")] = encodeControllers(rows.map {
+            if (it.address != address) it
+            else it.copy(modelId = model.id, gatt = model.gatt, name = if (it.name == DeviceProfile.find(it.modelId)?.name) model.name else it.name)
+        })
     } }
     suspend fun linkInput(address: String, descriptor: String?) { store.edit { values ->
         val saved = values[stringPreferencesKey("controllers")]?.let(::decodeControllers).orEmpty()

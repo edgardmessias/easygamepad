@@ -28,6 +28,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import br.dev.edgard.easygamepad.HubViewModel
+import br.dev.edgard.easygamepad.data.ControllerArtworkCatalog
 import br.dev.edgard.easygamepad.ble.LinkPhase
 import br.dev.edgard.easygamepad.data.ProfileStore
 import br.dev.edgard.easygamepad.protocol.*
@@ -42,7 +43,8 @@ import kotlinx.coroutines.withContext
     val link by model.link.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val actionSpace = if (LocalDensity.current.fontScale >= 1.3f) 160.dp else 84.dp
+    val shortWindow = LocalWindowLayout.current.shortHeight
+    val actionSpace = if (LocalDensity.current.fontScale >= 1.3f) 160.dp else if (shortWindow) 64.dp else 84.dp
     val section by model.profileSection.collectAsStateWithLifecycle()
     var savedVisible by rememberSaveable { mutableStateOf(false) }
     var editingName by rememberSaveable { mutableStateOf(false) }
@@ -143,7 +145,7 @@ import kotlinx.coroutines.withContext
                             }
                         }
                     }
-                    ControllerStage(Modifier.fillMaxWidth().aspectRatio(1.65f), x10 = true, rear = rear, mappings = draft.mappings, onPick = { keyPicker = it })
+                    ControllerStage(Modifier.fillMaxWidth().then(if (LocalWindowLayout.current.shortHeight) Modifier.height(220.dp) else Modifier.aspectRatio(1.65f)), artwork = ControllerArtworkCatalog.X10, rear = rear, mappings = draft.mappings, onPick = { keyPicker = it })
                     Description(tr("Tap a button to choose its function. Highlights show your custom assignments.",
                         "Toque em um botão para escolher sua função. Os destaques mostram suas alterações."))
                 }
@@ -206,7 +208,8 @@ import kotlinx.coroutines.withContext
     }
     Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth(), color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp) {
         Column(Modifier.padding(horizontal = 18.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(tr("Edits reach your controller when you apply.", "Os ajustes só mudam no controle ao aplicar."),
+            // Short landscape windows keep the action bar to one row; the apply dialog still explains this.
+            if (!shortWindow) Text(tr("Edits reach your controller when you apply.", "Os ajustes só mudam no controle ao aplicar."),
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = model::save, enabled = runCatching { draft.validate() }.isSuccess,

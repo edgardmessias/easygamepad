@@ -15,6 +15,7 @@ Start with the [project overview](../README.md), or choose a guide below.
 | --- | --- |
 | [Development guide](development.md) | Architecture, device identity, profile files, diagnostics and hardware validation |
 | [KRLY protocol](protocol.md) | BLE transport, frame format, commands, responses and byte examples |
+| [KeyLinker protocol](keylinker.md) | EasySMX X20 / X20 Pro: framing, requests, evidence-based write gate and support matrix |
 | [Contributing](../CONTRIBUTING.md) | Environment setup, checks and contribution expectations |
 | [Agent guidelines](../AGENTS.md) | Repository conventions for coding agents |
 

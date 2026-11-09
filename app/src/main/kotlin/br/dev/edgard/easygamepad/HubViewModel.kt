@@ -11,6 +11,9 @@ import androidx.lifecycle.viewModelScope
 import br.dev.edgard.easygamepad.data.*
 import br.dev.edgard.easygamepad.ble.LinkPhase
 import br.dev.edgard.easygamepad.protocol.*
+import br.dev.edgard.easygamepad.protocol.keylinker.KeyLinkerFeature
+import br.dev.edgard.easygamepad.protocol.keylinker.KeyLinkerSerials
+import br.dev.edgard.easygamepad.protocol.keylinker.KeyLinkerWritePlan
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
@@ -26,6 +29,8 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     private val selectedId = MutableStateFlow<String?>(null)
     private val setupInput = MutableStateFlow<String?>(null)
     private val setupGatt = MutableStateFlow<GattProfile?>(null)
+    /** Model chosen when adding a controller; decides the protocol, artwork and GATT profile. */
+    val setupModel = MutableStateFlow(DeviceProfile.X10)
     private val runtimeLinks = MutableStateFlow<Map<String, Int>>(emptyMap())
     private val sessionNames = MutableStateFlow<Map<String, String>>(emptyMap())
     val deviceSheet = MutableStateFlow(false)
@@ -36,9 +41,9 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
         controllerDevices(prefs.controllers, pads, links, prefs.inputNames, names)
     }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    val selectedDevice = combine(devices, selectedId, setupInput, setupGatt) { rows, id, descriptor, gatt ->
-        rows.firstOrNull { it.id == id } ?: if (id == SETUP_ID) ControllerDevice(SETUP_ID, "EasySMX X10", DeviceProfile.X10.id,
-            inputDescriptor = descriptor, inputId = app.input.state.value.pads.firstOrNull { it.descriptor == descriptor }?.id, gatt = gatt ?: GattProfile()) else null
+    val selectedDevice = combine(devices, selectedId, setupInput, setupGatt, setupModel) { rows, id, descriptor, gatt, model ->
+        rows.firstOrNull { it.id == id } ?: if (id == SETUP_ID) ControllerDevice(SETUP_ID, model.name, model.id,
+            inputDescriptor = descriptor, inputId = app.input.state.value.pads.firstOrNull { it.descriptor == descriptor }?.id, gatt = gatt ?: model.gatt) else null
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
     private fun inputPads() = app.input.state.map { it.pads }.distinctUntilChanged()
     private val mutableDraft = MutableStateFlow(ControllerConfig())
@@ -47,9 +52,11 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     val profileSection = MutableStateFlow(0)
     val connectionSheet = MutableStateFlow(false)
     val hardware = repository.state
+    val keyLinker = app.keyLinker.state
     val input = app.input.state
     val link = ble.link
     private var connectingGatt: GattProfile? = null
+    private var connectingModel: String? = null
     private var reconnectJob: Job? = null
     private var disconnectJob: Job? = null
     private var manuallyDisconnected = false
@@ -78,7 +85,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
                     val previousId = selectedId.value
                     val target = "ble:${state.address}"
                     val descriptor = setupInput.value ?: selectedDevice.value?.takeIf { it.address == state.address }?.inputDescriptor
-                    app.store.device(state.address, connectingGatt ?: preferences.value.gatt, descriptor)
+                    app.store.device(state.address, connectingGatt ?: preferences.value.gatt, descriptor, connectingModel)
                     if (selectionRevision != revision || switching.value || manuallyDisconnected ||
                         ble.link.value.phase != LinkPhase.READY || ble.link.value.address != state.address) return@collect
                     if (previousId != target) mutableDraft.value = drafts.switch(previousId, target, mutableDraft.value, previousId == SETUP_ID)
@@ -121,8 +128,15 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
             } finally { switching.value = false }
         }
     }
-    fun addX10(fromSelectedInput: Boolean = false) {
+    fun addX10(fromSelectedInput: Boolean = false) = addController(DeviceProfile.X10, fromSelectedInput)
+    /** Starts setup for a model the user picked. Nothing is sent until they choose a device to connect to. */
+    fun addController(model: DeviceProfile, fromSelectedInput: Boolean = false) {
         val descriptor = if (fromSelectedInput) selectedDevice.value?.inputDescriptor else null
+        if (hardware.value.busy || hardware.value.calibration.stopRequired || switching.value) {
+            repository.notice("Finish the current controller operation before switching.", "Finalize a operação atual do controle antes de trocar.", true)
+            return
+        }
+        setupModel.value = model
         changeSelection(SETUP_ID, descriptor)
         viewModelScope.launch {
             switching.first { !it }
@@ -158,7 +172,12 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     private fun configurationTarget(): Boolean = selectedDevice.value?.let {
-        it.supportsConfiguration && !switching.value && it.address != null && it.address == ble.link.value.address && ble.link.value.phase == LinkPhase.READY
+        it.supportsConfiguration && !switching.value && it.address != null && it.address == ble.link.value.address &&
+            ble.link.value.phase == LinkPhase.READY && ble.link.value.protocol == ConfigurationProtocol.KRLY
+    } == true
+    private fun keyLinkerTarget(): Boolean = selectedDevice.value?.let {
+        it.supportsKeyLinker && !switching.value && it.address != null && it.address == ble.link.value.address &&
+            ble.link.value.phase == LinkPhase.READY && ble.link.value.protocol == ConfigurationProtocol.KEYLINKER
     } == true
     fun edit(update: (ControllerConfig) -> ControllerConfig) { mutableDraft.update(update) }
     fun load(config: ControllerConfig) { mutableDraft.value = config; tab.value = 1 }
@@ -173,14 +192,31 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
         repository.notice("Enable Bluetooth and allow Nearby devices. Android 8–11 also needs Location enabled.", "Ative o Bluetooth e permita dispositivos próximos. Android 8–11 também exige localização ativa.", true)
     } }
     fun connect(address: String, gatt: GattProfile = selectedDevice.value?.gatt ?: preferences.value.gatt) {
-        if (selectedDevice.value?.supportsConfiguration != true || switching.value) return
+        val device = selectedDevice.value
+        if (device?.hasConfigurationLink != true || switching.value) return
+        val model = device.profile ?: DeviceProfile.X10
         manuallyDisconnected = false
         selectionRevision++
-        runCatching { connectingGatt = gatt; ble.connect(address.uppercase(), gatt) }.onSuccess {
+        runCatching { openLink(address.uppercase(), gatt, model) }.onSuccess {
             connectionSheet.value = false
         }.onFailure {
             repository.notice("Could not connect. Check that the controller is on and Bluetooth permissions are allowed.", "Não foi possível conectar. Confira se o controle está ligado e se o app tem permissão para usar Bluetooth.", true)
         }
+    }
+    /** The protocol comes from the model the user picked, never from the advertised name. */
+    private fun openLink(address: String, gatt: GattProfile, model: DeviceProfile) {
+        val protocol = model.configurationProtocol ?: ConfigurationProtocol.KRLY
+        // KeyLinker always uses its own GATT service; custom UUIDs apply to the X10 channel only.
+        val profile = if (protocol == ConfigurationProtocol.KEYLINKER) model.gatt else gatt
+        connectingGatt = profile; connectingModel = model.id
+        ble.connect(address, profile, protocol, model.name)
+    }
+    /** Saves the model the controller reported, after the person confirmed it. */
+    fun useIdentifiedModel() {
+        val address = selectedDevice.value?.address ?: return
+        val identified = keyLinker.value.identifiedModelId ?: return
+        viewModelScope.launch { runCatching { app.store.model(address, identified) }
+            .onSuccess { repository.notice("Saved as the identified model", "Salvo como o modelo identificado") } }
     }
     fun saveGatt(gatt: GattProfile) { runCatching {
         listOf(gatt.service, gatt.write, gatt.notify).forEach { UUID.fromString(it) }
@@ -212,9 +248,9 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
                 if (device?.id != retryDevice) { retryDevice = device?.id; retryAt = 0; backoff = 5_000 }
                 if (!manuallyDisconnected && !switching.value && !deviceSheet.value && !connectionSheet.value && !ble.scanning.value &&
                     ble.link.value.phase == LinkPhase.DISCONNECTED && ble.enabled() &&
-                    device?.supportsConfiguration == true && !device.address.isNullOrBlank() && now >= retryAt) {
+                    device?.hasConfigurationLink == true && !device.address.isNullOrBlank() && now >= retryAt) {
                     selectionRevision++
-                    runCatching { connectingGatt = device.gatt; ble.connect(requireNotNull(device.address), device.gatt) }
+                    runCatching { openLink(requireNotNull(device.address), device.gatt, device.profile ?: DeviceProfile.X10) }
                         .onFailure { ble.log("RECONNECT", it.message ?: "Retry failed") }
                     retryAt = now + backoff + 18_000L
                     backoff = (backoff * 2).coerceAtMost(60_000L)
@@ -232,9 +268,18 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshBattery() {
         app.input.refreshDevices()
         if (configurationTarget()) viewModelScope.launch { repository.refreshBattery() }
+        else if (keyLinkerTarget()) app.keyLinker.refreshBatteryAsync()
     }
+    fun readKeyLinker() { if (keyLinkerTarget()) app.keyLinker.readSettingsAsync() }
+    /** Shows the exact frames a KeyLinker write would send, and whether it may be sent. Nothing is sent yet. */
+    fun previewKeyLinker(feature: KeyLinkerFeature, build: (KeyLinkerSerials) -> KeyLinkerWritePlan) = app.keyLinker.preview(feature, build)
+    fun clearKeyLinkerPreview() = app.keyLinker.clearPreview()
+    /** Sends the reviewed write when X20CTL's evidence allows it, then confirms it by reading it back. */
+    fun sendKeyLinker() { if (keyLinkerTarget()) app.keyLinker.sendPreviewAsync() }
     fun customize(section: Int = 0) {
-        if (selectedDevice.value?.supportsConfiguration != true) { tab.value = 2; return }
+        val device = selectedDevice.value
+        if (device?.supportsKeyLinker == true) { profileSection.value = section.coerceIn(0, 5); tab.value = 1; return }
+        if (device?.supportsConfiguration != true) { tab.value = 2; return }
         profileSection.value = section.coerceIn(0, 5); tab.value = 1
     }
     fun connectSelected() {
