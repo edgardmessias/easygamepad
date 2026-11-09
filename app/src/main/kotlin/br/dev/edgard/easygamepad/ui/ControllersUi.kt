@@ -50,10 +50,8 @@ import br.dev.edgard.easygamepad.protocol.DeviceProfile
     val devices by model.devices.collectAsStateWithLifecycle()
     val selected by model.selectedDevice.collectAsStateWithLifecycle()
     val link by model.link.collectAsStateWithLifecycle()
-    val hardware by model.hardware.collectAsStateWithLifecycle()
-    val switching by model.switching.collectAsStateWithLifecycle()
+    val canSwitch by model.canSwitchController.collectAsStateWithLifecycle()
     val input by model.input.collectAsStateWithLifecycle()
-    val canSwitch = !hardware.busy && !hardware.calibration.stopRequired && !switching
     var renaming by remember { mutableStateOf<ControllerDevice?>(null) }
     Column(Modifier.fillMaxWidth().heightIn(max = 680.dp).verticalScroll(rememberScrollState()).padding(horizontal = 22.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text(tr("Your controllers", "Seus controles"), style = MaterialTheme.typography.headlineMedium)

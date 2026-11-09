@@ -4,7 +4,9 @@ package br.dev.edgard.easygamepad.data
 
 import br.dev.edgard.easygamepad.ble.BleClient
 import br.dev.edgard.easygamepad.ble.LinkPhase
+import br.dev.edgard.easygamepad.ble.LinkState
 import br.dev.edgard.easygamepad.protocol.ConfigurationProtocol
+import br.dev.edgard.easygamepad.protocol.GamepadTransport
 import br.dev.edgard.easygamepad.protocol.keylinker.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -49,113 +51,170 @@ data class KeyLinkerState(
  * identity. A write is shown for review first and sent only when the user confirms and X20CTL's hardware
  * evidence allows it (see [KeyLinkerAssessment.writeDecision]); it is then confirmed by reading it back.
  */
-class KeyLinkerRepository(private val ble: BleClient, private val scope: CoroutineScope, private val notify: (Notice) -> Unit) {
+class KeyLinkerRepository internal constructor(
+    private val transport: GamepadTransport,
+    private val link: StateFlow<LinkState>,
+    private val scope: CoroutineScope,
+    private val log: (String, String) -> Unit,
+    private val notify: (Notice) -> Unit,
+) {
+    constructor(ble: BleClient, scope: CoroutineScope, notify: (Notice) -> Unit) : this(ble, ble.link, scope, ble::log, notify)
+
     private val mutableState = MutableStateFlow(KeyLinkerState())
     val state = mutableState.asStateFlow()
-    private var gate: KeyLinkerGate? = null
-    private var session: KeyLinkerSession? = null
-    private var client: KeyLinkerClient? = null
+    private class Connection(val address: String, val gate: KeyLinkerGate, val session: KeyLinkerSession) {
+        val client = KeyLinkerClient(session)
+    }
+    private var connection: Connection? = null
+    private var previewConnection: Connection? = null
     private var linkJob: Job? = null
     private val exclusive = Mutex()
     private val planSerials = KeyLinkerSerials()
 
     init {
         scope.launch {
-            ble.link.map { link -> link.address.takeIf { link.phase == LinkPhase.READY && link.protocol == ConfigurationProtocol.KEYLINKER } }
+            link.map { link -> link.address.takeIf { link.phase == LinkPhase.READY && link.protocol == ConfigurationProtocol.KEYLINKER } }
                 .distinctUntilChanged().collect { address ->
                     linkJob?.cancel(); linkJob = null
-                    session?.close(); session = null; client = null; gate = null
+                    val previous = connection
+                    connection = null; previewConnection = null
+                    previous?.session?.close()
                     if (address == null) { mutableState.value = KeyLinkerState(); return@collect }
                     val newGate = KeyLinkerGate()
-                    val newSession = KeyLinkerSession(ble, scope, newGate::authorize)
-                    gate = newGate; session = newSession; client = KeyLinkerClient(newSession)
-                    mutableState.value = KeyLinkerState(KeyLinkerPhase.IDENTIFYING, address)
-                    linkJob = scope.launch { identifyThenPoll() }
+                    lateinit var active: Connection
+                    val boundTransport = object : GamepadTransport {
+                        override val notifications = transport.notifications.filter { isCurrent(active) }
+                        override suspend fun write(frame: ByteArray) {
+                            check(isCurrent(active)) { "KeyLinker connection changed" }
+                            transport.write(frame)
+                        }
+                        override fun abort(cause: Throwable) {
+                            if (isCurrent(active)) transport.abort(cause)
+                        }
+                    }
+                    active = Connection(address, newGate, KeyLinkerSession(boundTransport, scope, newGate::authorize))
+                    connection = active
+                    mutableState.value = KeyLinkerState(KeyLinkerPhase.IDENTIFYING, address, busy = true)
+                    linkJob = scope.launch { identifyThenPoll(active) }
                 }
         }
     }
 
-    private suspend fun identifyThenPoll() {
-        val identified = exclusive.withLock { guarded { identify() } } ?: false
-        if (!identified || !state.value.mayRead) return
-        refreshBattery()
-        readSettings(quiet = true)
-        while (currentCoroutineContext().isActive) { delay(180_000); refreshBattery() }
+    private fun isCurrent(active: Connection) = connection === active && link.value.let {
+        it.phase == LinkPhase.READY && it.protocol == ConfigurationProtocol.KEYLINKER && it.address == active.address
     }
 
-    private suspend fun identify(): Boolean {
-        val active = checkNotNull(client)
-        val result = active.identify()
-        gate?.assessment = result.assessment
-        gate?.capabilities = result.capabilities
-        mutableState.update { it.copy(phase = if (result.identity == null) KeyLinkerPhase.NO_REPLY else KeyLinkerPhase.IDENTIFIED, identification = result) }
-        ble.log("KEYLINKER", result.assessment?.reason ?: "No identity reply")
+    private fun update(active: Connection, transform: (KeyLinkerState) -> KeyLinkerState) {
+        if (isCurrent(active)) mutableState.update(transform)
+    }
+
+    private suspend fun identifyThenPoll(active: Connection) {
+        val identified = exclusive.withLock { guarded(active) { identify(active) } } ?: false
+        if (!identified || !isCurrent(active) || !state.value.mayRead) return
+        refreshBattery(active)
+        readSettings(active, quiet = true)
+        while (currentCoroutineContext().isActive) { delay(180_000); refreshBattery(active) }
+    }
+
+    private suspend fun identify(active: Connection): Boolean {
+        val result = active.client.identify()
+        if (!isCurrent(active)) return false
+        active.gate.assessment = result.assessment
+        active.gate.capabilities = result.capabilities
+        update(active) { it.copy(phase = if (result.identity == null) KeyLinkerPhase.NO_REPLY else KeyLinkerPhase.IDENTIFIED, identification = result) }
+        log("KEYLINKER", result.assessment?.reason ?: "No identity reply")
         return result.identity != null
     }
 
     /** Runs one exchange series and turns failures into a notice. A transport error drops the link. */
-    private suspend fun <T> guarded(block: suspend () -> T): T? {
-        mutableState.update { it.copy(busy = true) }
+    private suspend fun <T> guarded(active: Connection, block: suspend () -> T): T? {
+        if (!isCurrent(active)) return null
+        update(active) { it.copy(busy = true) }
         return try { block() }
         catch (cancel: CancellationException) { throw cancel }
         catch (refused: KeyLinkerNotAuthorized) {
-            ble.log("KEYLINKER", "Refused locally: ${refused.message}")
-            notify(Notice("Not sent: ${refused.message}", "Não enviado: ${refused.message}", true)); null
+            if (isCurrent(active)) {
+                log("KEYLINKER", "Refused locally: ${refused.message}")
+                notify(Notice("Not sent: ${refused.message}", "Não enviado: ${refused.message}", true))
+            }
+            null
         } catch (error: Exception) {
-            ble.log("ERROR", error.message ?: error.javaClass.simpleName)
-            notify(Notice("The controller did not answer. Check the connection and try again.", "O controle não respondeu. Verifique a conexão e tente novamente.", true)); null
-        } finally { mutableState.update { it.copy(busy = false) } }
+            if (isCurrent(active)) {
+                log("ERROR", error.message ?: error.javaClass.simpleName)
+                notify(Notice("The controller did not answer. Check the connection and try again.", "O controle não respondeu. Verifique a conexão e tente novamente.", true))
+            }
+            null
+        } finally { update(active) { it.copy(busy = false) } }
     }
 
-    fun refreshBatteryAsync() { scope.launch { refreshBattery() } }
+    fun refreshBatteryAsync() {
+        val active = connection ?: return
+        scope.launch { refreshBattery(active) }
+    }
     suspend fun refreshBattery() {
-        if (!state.value.mayRead) return
+        refreshBattery(connection ?: return)
+    }
+    private suspend fun refreshBattery(active: Connection) {
+        if (!isCurrent(active) || !state.value.mayRead) return
         exclusive.withLock {
-            guarded { checkNotNull(client).battery() }?.let { gauge -> mutableState.update { it.copy(battery = gauge, batteryAt = System.currentTimeMillis()) } }
+            guarded(active) { active.client.battery() }?.let { gauge -> update(active) { it.copy(battery = gauge, batteryAt = System.currentTimeMillis()) } }
         }
     }
 
-    fun readSettingsAsync() { scope.launch { readSettings(quiet = false) } }
+    fun readSettingsAsync() {
+        val active = connection ?: return
+        scope.launch { readSettings(active, quiet = false) }
+    }
     suspend fun readSettings(quiet: Boolean) {
+        readSettings(connection ?: return, quiet)
+    }
+    private suspend fun readSettings(active: Connection, quiet: Boolean) {
+        if (!isCurrent(active)) return
         if (!state.value.mayRead) {
             notify(Notice("This controller was identified only. Settings are read from verified X20 and X20 Pro identities.",
                 "Este controle foi apenas identificado. Os ajustes são lidos de identidades verificadas do X20 e X20 Pro.", true))
             return
         }
         exclusive.withLock {
-            mutableState.update { it.copy(phase = KeyLinkerPhase.READING, progress = 0f) }
-            val settings = guarded { checkNotNull(client).readSettings(state.value.capabilities) { p -> mutableState.update { it.copy(progress = p) } } }
-            mutableState.update { it.copy(phase = KeyLinkerPhase.IDENTIFIED, settings = settings ?: it.settings, progress = 1f) }
-            if (settings != null && !quiet) notify(Notice("Read from the controller. Nothing was changed.", "Lido do controle. Nada foi alterado."))
+            if (!isCurrent(active)) return@withLock
+            update(active) { it.copy(phase = KeyLinkerPhase.READING, progress = 0f) }
+            val settings = guarded(active) { active.client.readSettings(active.gate.capabilities) { p -> update(active) { it.copy(progress = p) } } }
+            update(active) { it.copy(phase = KeyLinkerPhase.IDENTIFIED, settings = settings ?: it.settings, progress = 1f) }
+            if (isCurrent(active) && settings != null && !quiet) notify(Notice("Read from the controller. Nothing was changed.", "Lido do controle. Nada foi alterado."))
         }
     }
 
     /** Builds the frames a write would send and records why it is blocked. Never sends anything. */
     fun preview(feature: KeyLinkerFeature, build: (KeyLinkerSerials) -> KeyLinkerWritePlan) {
+        val active = connection?.takeIf(::isCurrent) ?: return
         val current = state.value
         val decision = current.assessment?.writeDecision(feature, current.capabilities)
             ?: KeyLinkerWriteDecision.Blocked(KeyLinkerWriteDecision.Reason.NOT_IDENTIFIED, "Controller not identified yet.")
         val plan = runCatching { build(planSerials) }.getOrElse { error ->
             notify(Notice("Invalid value: ${error.message}", "Valor inválido: ${error.message}", true)); return
         }
-        mutableState.update { it.copy(preview = KeyLinkerPlanPreview(plan, decision, build)) }
+        previewConnection = active
+        update(active) { it.copy(preview = KeyLinkerPlanPreview(plan, decision, build)) }
     }
-    fun clearPreview() { mutableState.update { it.copy(preview = null) } }
+    fun clearPreview() { previewConnection = null; mutableState.update { it.copy(preview = null) } }
 
-    fun sendPreviewAsync() { scope.launch { sendPreview() } }
+    fun sendPreviewAsync() {
+        val active = previewConnection?.takeIf(::isCurrent) ?: return
+        val preview = state.value.preview?.takeIf { it.allowed } ?: return
+        clearPreview()
+        scope.launch { sendPreview(active, preview) }
+    }
 
     /** Sends the reviewed write the X20CTL way (re-read, send, read back), then reads every setting again. */
-    private suspend fun sendPreview() {
-        val preview = state.value.preview?.takeIf { it.allowed } ?: return
-        mutableState.update { it.copy(preview = null) }
+    private suspend fun sendPreview(active: Connection, preview: KeyLinkerPlanPreview) {
         val result = exclusive.withLock {
-            guarded {
-                val active = checkNotNull(client)
-                val plan = preview.build(active.serials)
-                ble.log("KEYLINKER", "Writing ${plan.summary} (${plan.packets.size} frame(s))")
-                active.apply(plan).also { ble.log("KEYLINKER", "Write result: $it") }
+            guarded(active) {
+                val plan = preview.build(active.client.serials)
+                log("KEYLINKER", "Writing ${plan.summary} (${plan.packets.size} frame(s))")
+                active.client.apply(plan).also { log("KEYLINKER", "Write result: $it") }
             }
         } ?: return
+        if (!isCurrent(active)) return
         notify(when (result) {
             KeyLinkerWriteResult.Confirmed -> Notice("Saved to the controller and confirmed by reading it back.", "Salvo no controle e confirmado pela releitura.")
             is KeyLinkerWriteResult.Mismatch -> Notice("The controller now reports ${result.readBack}, not what was sent. Check it before trying again.",
@@ -165,6 +224,6 @@ class KeyLinkerRepository(private val ble: BleClient, private val scope: Corouti
             KeyLinkerWriteResult.Unconfirmed -> Notice("Sent, but the controller did not answer the check. Reading the settings again.",
                 "Enviado, mas o controle não respondeu à conferência. Lendo os ajustes de novo.", true)
         })
-        readSettings(quiet = true)
+        readSettings(active, quiet = true)
     }
 }

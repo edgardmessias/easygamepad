@@ -30,6 +30,7 @@ import br.dev.edgard.easygamepad.data.controllerStatus
     val prefs by model.preferences.collectAsStateWithLifecycle()
     val input by model.input.collectAsStateWithLifecycle()
     val switching by model.switching.collectAsStateWithLifecycle()
+    val canSwitchController by model.canSwitchController.collectAsStateWithLifecycle()
     val keyLinker by model.keyLinker.collectAsStateWithLifecycle()
     val status = controllerStatus(selected, link, hardware, keyLinker)
     val metricColumns = if (LocalDensity.current.fontScale >= 1.5f) 1 else 3
@@ -136,7 +137,7 @@ import br.dev.edgard.easygamepad.data.controllerStatus
             pills()
             if (devices.size > 1) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 devices.forEach { row -> FilterChip(row.id == device.id, { if (!switching) model.chooseDevice(row) },
-                    label = { Text(row.name) }, enabled = !switching && !hardware.busy && !hardware.calibration.stopRequired) }
+                    label = { Text(row.name) }, enabled = canSwitchController) }
             }
             if (device.artwork != null && !layout.twoPane) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { sides() }
             ControllerStage(Modifier.fillMaxWidth().height(layout.stageHeight(188.dp)), device.artwork,

@@ -53,6 +53,8 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     val connectionSheet = MutableStateFlow(false)
     val hardware = repository.state
     val keyLinker = app.keyLinker.state
+    private val operationGate = ControllerOperationGate(hardware, keyLinker, switching)
+    val canSwitchController = operationGate.canSwitch.stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val input = app.input.state
     val link = ble.link
     private var connectingGatt: GattProfile? = null
@@ -108,7 +110,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
         changeSelection(device.id)
     }
     private fun changeSelection(id: String?, descriptor: String? = null) {
-        if (hardware.value.busy || hardware.value.calibration.stopRequired || switching.value) {
+        if (!operationGate.canSwitchNow()) {
             repository.notice("Finish the current controller operation before switching.", "Finalize a operação atual do controle antes de trocar.", true)
             return
         }
@@ -132,7 +134,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     /** Starts setup for a model the user picked. Nothing is sent until they choose a device to connect to. */
     fun addController(model: DeviceProfile, fromSelectedInput: Boolean = false) {
         val descriptor = if (fromSelectedInput) selectedDevice.value?.inputDescriptor else null
-        if (hardware.value.busy || hardware.value.calibration.stopRequired || switching.value) {
+        if (!operationGate.canSwitchNow()) {
             repository.notice("Finish the current controller operation before switching.", "Finalize a operação atual do controle antes de trocar.", true)
             return
         }
@@ -146,7 +148,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     fun linkGameplay(inputId: Int?) {
         val target = selectedDevice.value ?: return
         val address = target.address ?: return
-        if (hardware.value.busy || hardware.value.calibration.stopRequired || switching.value) return
+        if (!operationGate.canSwitchNow()) return
         val pad = app.input.state.value.pads.firstOrNull { it.id == inputId }
         runtimeLinks.update { links -> (links.filterValues { it != inputId } - address) + mapOf(address to (pad?.id ?: -1)) }
         viewModelScope.launch { app.store.linkInput(address, pad?.descriptor) }
@@ -193,7 +195,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     } }
     fun connect(address: String, gatt: GattProfile = selectedDevice.value?.gatt ?: preferences.value.gatt) {
         val device = selectedDevice.value
-        if (device?.hasConfigurationLink != true || switching.value) return
+        if (device?.hasConfigurationLink != true || !operationGate.canSwitchNow()) return
         val model = device.profile ?: DeviceProfile.X10
         manuallyDisconnected = false
         selectionRevision++
