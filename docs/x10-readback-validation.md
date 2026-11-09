@@ -8,8 +8,11 @@ not recorded. This is evidence for the requested write/read-back workflow, not
 for every setting, macro playback or persistence after power-off.
 
 The maintainer separately reported that **Test Android gamepad vibration** did
-not vibrate. That action uses Android's input-device vibration API rather than
-the KRLY profile write/read-back path and is being investigated separately.
+not vibrate and displayed the unsupported-device notice. Android's input dump
+and kernel input capabilities showed no vibrator/force-feedback capability for
+the connected gameplay device. The UI now disables this test when Android
+exposes no vibrator and explains that motor intensity can still be configured.
+This does not establish a separate KRLY motor-test command.
 
 The upload keeps its existing KRLY command sequence. After returning to normal
 mode, it now queries settings (119) and mappings (80) and compares the complete

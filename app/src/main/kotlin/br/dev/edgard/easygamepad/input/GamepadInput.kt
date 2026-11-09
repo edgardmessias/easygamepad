@@ -6,6 +6,7 @@ package br.dev.edgard.easygamepad.input
 import android.content.Context
 import android.hardware.input.InputManager
 import android.os.VibrationEffect
+import android.os.CombinedVibration
 import android.os.Build
 import android.view.InputDevice
 import android.view.KeyEvent
@@ -45,7 +46,7 @@ class GamepadInput(context: Context) : InputManager.InputDeviceListener {
                 val percent = capacity?.takeIf { value -> value.isFinite() && value in 0f..1f }?.let { value -> (value * 100).roundToInt() }
                 percent to (state.status == android.hardware.BatteryState.STATUS_CHARGING)
             }.getOrNull() else null
-            InputPad(it.id, it.name, it.vendorId, it.productId, it.vibrator.hasVibrator(), it.descriptor,
+            InputPad(it.id, it.name, it.vendorId, it.productId, canVibrate(it), it.descriptor,
                 battery?.first, battery?.second == true)
         }
         sessions.refresh(pads)
@@ -92,10 +93,14 @@ class GamepadInput(context: Context) : InputManager.InputDeviceListener {
     }
     fun rumble(): Boolean {
         val pad = state.value.selectedId?.let { manager.getInputDevice(it) } ?: return false
-        if (!pad.vibrator.hasVibrator()) return false
-        pad.vibrator.vibrate(VibrationEffect.createOneShot(250, VibrationEffect.DEFAULT_AMPLITUDE))
+        if (!canVibrate(pad)) return false
+        val effect = VibrationEffect.createOneShot(250, VibrationEffect.DEFAULT_AMPLITUDE)
+        if (Build.VERSION.SDK_INT >= 31) pad.vibratorManager.vibrate(CombinedVibration.createParallel(effect))
+        else pad.vibrator.vibrate(effect)
         return true
     }
+    private fun canVibrate(pad: InputDevice) = if (Build.VERSION.SDK_INT >= 31) pad.vibratorManager.vibratorIds.isNotEmpty()
+        else pad.vibrator.hasVibrator()
     override fun onInputDeviceAdded(deviceId: Int) = refresh()
     override fun onInputDeviceRemoved(deviceId: Int) = refresh()
     override fun onInputDeviceChanged(deviceId: Int) = refresh()

@@ -194,6 +194,12 @@ Set the left and right motor intensities independently, from 0 to 100%.
 vibrator, if exposed by that device. It does not apply the draft motor settings;
 availability depends on Android and the controller.
 
+The test is disabled with an explanation when no gameplay device is selected or
+Android exposes no vibrator for it. This can happen even when the X10's separate
+configuration connection can read and change motor intensity. On Android 12 and
+later the app uses the selected input device's vibrator manager; it never falls
+back to vibrating the phone or a different controller.
+
 <img src="images/vibration.png" width="300" alt="Vibration editor with left and right motor intensity sliders and an Android gamepad vibration test action">
 
 ### Apply and verify

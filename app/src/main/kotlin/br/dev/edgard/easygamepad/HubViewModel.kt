@@ -10,6 +10,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import br.dev.edgard.easygamepad.data.*
 import br.dev.edgard.easygamepad.ble.LinkPhase
+import br.dev.edgard.easygamepad.input.GamepadVibrationAvailability
+import br.dev.edgard.easygamepad.input.vibrationAvailability
 import br.dev.edgard.easygamepad.protocol.*
 import br.dev.edgard.easygamepad.protocol.keylinker.KeyLinkerFeature
 import br.dev.edgard.easygamepad.protocol.keylinker.KeyLinkerSerials
@@ -56,6 +58,8 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     private val operationGate = ControllerOperationGate(hardware, keyLinker, switching)
     val canSwitchController = operationGate.canSwitch.stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val input = app.input.state
+    val vibrationTestAvailability = input.map { it.vibrationAvailability() }.distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, GamepadVibrationAvailability.NO_DEVICE)
     val link = ble.link
     private var connectingGatt: GattProfile? = null
     private var connectingModel: String? = null

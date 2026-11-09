@@ -32,6 +32,7 @@ import br.dev.edgard.easygamepad.data.ControllerArtworkCatalog
 import br.dev.edgard.easygamepad.ble.LinkPhase
 import br.dev.edgard.easygamepad.data.ProfileStore
 import br.dev.edgard.easygamepad.data.x10ApplyNotice
+import br.dev.edgard.easygamepad.input.GamepadVibrationAvailability
 import br.dev.edgard.easygamepad.protocol.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -41,6 +42,7 @@ import kotlinx.coroutines.withContext
     val draft by model.draft.collectAsStateWithLifecycle()
     val prefs by model.preferences.collectAsStateWithLifecycle()
     val hardware by model.hardware.collectAsStateWithLifecycle()
+    val vibrationTestAvailability by model.vibrationTestAvailability.collectAsStateWithLifecycle()
     val link by model.link.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -197,8 +199,20 @@ import kotlinx.coroutines.withContext
                 Description(tr("Set the intensity of each controller motor. Availability depends on the controller's operating mode.", "Ajuste a intensidade de cada motor do controle. A disponibilidade depende do modo de operação."))
                 ValueSlider(tr("Left motor", "Motor esquerdo"), draft.leftVibration, 0..100, "%") { value -> model.edit { it.copy(leftVibration = value) } }
                 ValueSlider(tr("Right motor", "Motor direito"), draft.rightVibration, 0..100, "%") { value -> model.edit { it.copy(rightVibration = value) } }
-                OutlinedButton(onClick = model::rumble) { Text(tr("Test Android gamepad vibration", "Testar vibração do controle no Android")) }
-                Description(tr("The test uses the vibration supported by your phone. Apply the profile to try your chosen intensity on the controller.", "O teste usa a vibração disponível no seu celular. Aplique o perfil para experimentar a intensidade escolhida no controle."))
+                OutlinedButton(onClick = model::rumble, enabled = vibrationTestAvailability == GamepadVibrationAvailability.AVAILABLE) {
+                    Text(tr("Test Android gamepad vibration", "Testar vibração do controle no Android"))
+                }
+                Description(when (vibrationTestAvailability) {
+                    GamepadVibrationAvailability.NO_DEVICE -> tr(
+                        "Connect and select the gameplay controller to test vibration. The app configuration connection alone is not enough.",
+                        "Conecte e selecione o controle para jogar antes de testar a vibração. Apenas a conexão de configuração com o app não é suficiente.")
+                    GamepadVibrationAvailability.UNSUPPORTED -> tr(
+                        "Android does not expose vibration for this controller in its current connection mode. You can still apply motor intensity settings to the X10.",
+                        "O Android não disponibiliza vibração para este controle no modo de conexão atual. Você ainda pode aplicar os ajustes de intensidade dos motores ao X10.")
+                    GamepadVibrationAvailability.AVAILABLE -> tr(
+                        "Plays a short pulse on the selected gamepad using Android. It does not preview this draft's motor intensities.",
+                        "Aciona um pulso curto no controle selecionado usando o Android. O teste não reproduz as intensidades dos motores deste rascunho.")
+                })
             }
         }
         if (hardware.busy) LinearProgressIndicator(progress = { hardware.progress }, modifier = Modifier.fillMaxWidth())
