@@ -31,6 +31,7 @@ import br.dev.edgard.easygamepad.HubViewModel
 import br.dev.edgard.easygamepad.data.ControllerArtworkCatalog
 import br.dev.edgard.easygamepad.ble.LinkPhase
 import br.dev.edgard.easygamepad.data.ProfileStore
+import br.dev.edgard.easygamepad.data.x10ApplyNotice
 import br.dev.edgard.easygamepad.protocol.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -204,7 +205,12 @@ import kotlinx.coroutines.withContext
         if (link.phase != LinkPhase.READY) TextButton(onClick = model::connectSelected, modifier = Modifier.fillMaxWidth()) { Text(tr("Connect your controller to apply", "Conecte o controle para aplicar")) }
         OutlinedButton(onClick = { exportSnapshot = draft; export.launch("easygamepad-profile.json") }, enabled = runCatching { draft.validate() }.isSuccess, modifier = Modifier.fillMaxWidth()) { Text(tr("Export profile", "Exportar perfil")) }
         TextButton(onClick = { import.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }, modifier = Modifier.fillMaxWidth()) { Text(tr("Import profile from a file", "Importar perfil de um arquivo")) }
-        hardware.appliedAt?.let { Description(tr("Last controller confirmation: ", "Última confirmação do controle: ") + timeLabel(it)) }
+        hardware.applyResult?.let { result ->
+            val feedback = x10ApplyNotice(result)
+            Text(tr("Last apply result", "Resultado da última aplicação"), style = MaterialTheme.typography.titleSmall)
+            InfoBanner(tr(feedback.english, feedback.portuguese), feedback.error)
+        }
+        hardware.appliedAt?.let { Description(tr("Last settings read-back match: ", "Última conferência dos ajustes por releitura: ") + timeLabel(it)) }
     }
     Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth(), color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp) {
         Column(Modifier.padding(horizontal = 18.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -230,8 +236,8 @@ import kotlinx.coroutines.withContext
             "Substituir o perfil em edição pelos ajustes do seu X10? Salve antes se quiser guardar suas alterações. O nome do perfil e as sequências de macro serão mantidos."),
         tr("Get settings", "Trazer ajustes"), { readDialog = false }) { readDialog = false; model.readController() }
     if (applyDialog) ConfirmDialog(tr("Apply this setup?", "Aplicar esta configuração?"),
-        tr("Send this profile to your X10? Its current settings may change. Keep the controller nearby until it confirms completion. Removing a macro from this profile does not erase one already saved on the controller.",
-            "Enviar este perfil para seu X10? Os ajustes atuais podem mudar. Mantenha o controle por perto até a confirmação. Remover uma macro deste perfil não apaga uma sequência já salva no controle."),
+        tr("Send this profile to your X10? Keep it nearby while the app sends and reads back the settings. Macro sequences and persistence after power-off cannot be checked here. Removing a macro from this profile does not erase one already saved on the controller.",
+            "Enviar este perfil para seu X10? Mantenha-o por perto enquanto o app envia e relê os ajustes. As sequências de macro e a persistência após desligar não podem ser conferidas aqui. Remover uma macro deste perfil não apaga uma sequência já salva no controle."),
         tr("Apply setup", "Aplicar configuração"), { applyDialog = false }) { applyDialog = false; model.apply() }
     loadDialog?.let { config -> ConfirmDialog(tr("Load profile?", "Carregar perfil?"), tr("This replaces the profile you are editing. Save first if you want to keep your changes.", "Isso substitui o perfil em edição. Salve antes se quiser guardar suas alterações."), tr("Load", "Carregar"), { loadDialog = null }) { model.load(config); loadDialog = null } }
     deleteDialog?.let { id -> ConfirmDialog(tr("Delete saved profile?", "Excluir perfil salvo?"), tr("The saved copy will be removed from this phone.", "A cópia salva será removida deste celular."), tr("Delete", "Excluir"), { deleteDialog = null }) { model.delete(id); deleteDialog = null } }

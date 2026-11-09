@@ -15,6 +15,7 @@ data class HardwareState(
     val busy: Boolean = false, val progress: Float = 0f,
     val appliedAt: Long? = null, val sleepMinutes: Int? = null,
     val settingsReadAt: Long? = null,
+    val applyResult: X10ApplyResult? = null,
 )
 data class Notice(val english: String, val portuguese: String, val error: Boolean = false)
 
@@ -91,14 +92,7 @@ class ControllerRepository(val ble: BleClient, private val scope: CoroutineScope
     suspend fun readSettings(): ControllerSettings? = runOperation(false) {
         check(!state.value.calibration.stopRequired)
         val active = connected()
-        val pages = SettingsPages()
-        var settings: ControllerSettings? = null
-        active.request(119, bytes(2, 1)) { raw -> pages.accept(raw).also { settings = it } != null }
-        mutableState.update { it.copy(progress = .6f) }
-        val mappings = MappingPages()
-        var outputs: Map<PadKey, PadKey>? = null
-        active.request(80, bytes(1)) { raw -> mappings.accept(raw).also { outputs = it } != null }
-        val result = requireNotNull(settings).copy(mappings = requireNotNull(outputs))
+        val result = X10ProfileClient(active).readSettings { progress -> mutableState.update { it.copy(progress = progress) } }
         mutableState.update { it.copy(progress = 1f, settingsReadAt = System.currentTimeMillis()) }
         notice("Read from X10: buttons, sticks, triggers, vibration and turbo. Macro sequences kept from your draft.",
             "Lido do X10: botões, analógicos, gatilhos, vibração e turbo. Sequências de macro mantidas do rascunho.")
@@ -109,37 +103,25 @@ class ControllerRepository(val ble: BleClient, private val scope: CoroutineScope
         val firmware = requireNotNull(KrlyCodec.firmware(connected().request(132, bytes(1, 0))))
         mutableState.update { it.copy(firmware = firmware) }
     }
-    suspend fun apply(config: ControllerConfig): Boolean = runOperation {
+    suspend fun apply(config: ControllerConfig): Boolean = runOperation(false) {
         check(!state.value.calibration.stopRequired)
         config.validate()
         val active = connected()
-        try {
-            active.ack(1, bytes(16))
-            macroMode = true
-            active.ack(54, bytes(0, 0))
-            val commands = buildList<Pair<Int, ByteArray>> {
-                config.macros.forEach { macro -> macro.steps.indices.forEach { add(58 to KrlyCodec.macroStep(macro, it)) } }
-                config.turbos.forEach { add(55 to bytes(it.key.code, if (it.automatic) 1 else 0, it.rate)) }
-                add(57 to bytes(config.leftTrigger.min, config.leftTrigger.max, config.rightTrigger.min, config.rightTrigger.max))
-                add(62 to KrlyCodec.sticks(config.leftStick, config.rightStick))
-                config.mappings.forEach { (from, to) -> add(61 to bytes(from.code, to.code)) }
-                add(53 to bytes(config.leftVibration, config.rightVibration))
-                add(52 to byteArrayOf())
-            }
-            commands.forEachIndexed { index, (id, payload) ->
-                active.ack(id, payload)
-                mutableState.update { it.copy(progress = (index + 1f) / commands.size) }
-            }
-            active.ack(1, bytes(0))
-            macroMode = false
-            mutableState.update { it.copy(appliedAt = System.currentTimeMillis()) }
-            true
-        } finally {
-            // Also restore normal mode if a command was rejected or the operation cancelled.
-            withContext(NonCancellable) {
-                if (macroMode && ble.link.value.phase == LinkPhase.READY) runCatching { withTimeout(5500) { active.ack(1, bytes(0)); macroMode = false } }
-            }
-        }
+        mutableState.update { it.copy(appliedAt = null, applyResult = null) }
+        val result = X10ProfileClient(active).apply(config, uploadMode = { macroMode = it }, progress = { progress ->
+            mutableState.update { it.copy(progress = progress) }
+        })
+        val now = System.currentTimeMillis()
+        mutableState.update { it.copy(applyResult = result, progress = 1f,
+            appliedAt = now.takeIf { result is X10ApplyResult.Matched },
+            settingsReadAt = if (result is X10ApplyResult.Unconfirmed) it.settingsReadAt else now) }
+        ble.log("READBACK", when (result) {
+            is X10ApplyResult.Matched -> "X10 readable settings match; macros and power-cycle persistence not checked"
+            is X10ApplyResult.Mismatch -> "X10 settings mismatch: ${result.fields.joinToString()}"
+            is X10ApplyResult.Unconfirmed -> "X10 settings unconfirmed: ${result.reason}"
+        })
+        x10ApplyNotice(result).let { notice(it.english, it.portuguese, it.error) }
+        result is X10ApplyResult.Matched
     } ?: false
 
     suspend fun startCalibration(kind: CalibrationKind) = runOperation(false) {

@@ -30,6 +30,7 @@ class CommandSession(private val transport: GamepadTransport, scope: CoroutineSc
     private data class Pending(val id: Int, val response: CompletableDeferred<ByteArray>, val accept: (ByteArray) -> Boolean)
     @Volatile private var pending: Pending? = null
     @Volatile private var closed = false
+    val isClosed get() = closed
     private val collector = scope.launch(start = CoroutineStart.UNDISPATCHED) {
         transport.notifications.collect { notification ->
             decoder.feed(notification).forEach { frame ->

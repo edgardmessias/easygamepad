@@ -313,6 +313,15 @@ commands in this order, awaiting each ACK:
 7. Command 53 for both motor intensities.
 8. Command 52 with no payload: end/commit the upload.
 9. Command 1 with `00`: restore normal mode.
+10. Queries 119 and 80: read settings and mappings back before reporting the result.
+
+`X10ProfileClient` reports `Matched`, `Mismatch` (with the differing field groups),
+or `Unconfirmed` when the upload was accepted but read-back failed. Comparison
+covers buttons, sticks, triggers, motor intensity and turbo. It normalizes omitted
+identity mappings and ignores turbo ordering, while retaining unexpected mappings
+and turbo rules as differences. A match does not verify macro sequences or
+persistence after power-off. Only a match records a successful read-back timestamp.
+See [the physical validation procedure](x10-readback-validation.md) for test status.
 
 Upload stops on the first failure. Cleanup attempts to restore normal mode when
 the link remains ready, including after rejection or cancellation. There is no

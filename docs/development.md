@@ -120,6 +120,12 @@ Readback first collects settings using command 119, then mappings using command
 turbo fields. The local name and macro sequences remain. A read failure does not
 merge a partial result into the draft.
 
+Applying an X10 profile also reads queries 119 and 80 after returning to normal
+mode. `X10ProfileClient` compares the readable fields and returns a match,
+mismatch or unconfirmed result; ACKs alone do not count as a read-back match.
+This check leaves the local draft intact. Macro sequences and power-cycle
+persistence remain outside its coverage. See [X10 read-back validation](x10-readback-validation.md).
+
 The current importer accepts only the exact format/version/device tuple below.
 Do not infer compatibility from historical product names. Android backup is
 disabled, and uninstalling removes app data; export before uninstalling.
