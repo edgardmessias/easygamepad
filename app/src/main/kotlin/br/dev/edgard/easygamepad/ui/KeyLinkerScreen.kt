@@ -295,22 +295,24 @@ private val presetNames = mapOf("default" to ("Default" to "Padrão"), "quick" t
 }
 
 @Composable private fun MotorEditor(motor: KeyLinkerMotorRecord, model: HubViewModel) {
-    var strength by remember(motor) { mutableFloatStateOf(motor.leftPercent.toFloat()) }
+    var leftStrength by remember(motor) { mutableIntStateOf(motor.leftPercent) }
+    var rightStrength by remember(motor) { mutableIntStateOf(motor.rightPercent) }
     var idle by remember(motor) { mutableFloatStateOf((motor.shutdownMinutes ?: 0).toFloat()) }
     Text(tr("Vibration", "Vibração"), style = MaterialTheme.typography.titleMedium)
     Description(tr("Left ${motor.leftPercent}% · right ${motor.rightPercent}%", "Esquerda ${motor.leftPercent}% · direita ${motor.rightPercent}%"))
-    Slider(strength, { strength = it }, valueRange = 0f..100f, steps = 19)
+    ValueSlider(tr("Left motor", "Motor esquerdo"), leftStrength, 0..100, "%") { leftStrength = it }
+    ValueSlider(tr("Right motor", "Motor direito"), rightStrength, 0..100, "%") { rightStrength = it }
     Text(tr("Turn off when idle", "Desligar quando ocioso"), style = MaterialTheme.typography.titleMedium)
     Description(motor.shutdownMinutes?.let { tr("After $it min", "Após $it min") } ?: tr("Never", "Nunca"))
     Slider(idle, { idle = it }, valueRange = 0f..KeyLinkerMotorRecord.MAX_SHUTDOWN_MINUTES.toFloat(), steps = KeyLinkerMotorRecord.MAX_SHUTDOWN_MINUTES - 1)
     Description(if (idle.toInt() == 0) tr("Draft: never", "Rascunho: nunca") else tr("Draft: ${idle.toInt()} min", "Rascunho: ${idle.toInt()} min"))
     val summary = tr("Vibration and idle timeout", "Vibração e desligamento automático")
-    val changedStrength = strength.toInt() != motor.leftPercent
+    val changedStrength = leftStrength != motor.leftPercent || rightStrength != motor.rightPercent
     val changedIdle = (idle.toInt().takeIf { it > 0 }) != motor.shutdownMinutes
     PreviewButton(changedStrength || changedIdle) {
         val feature = if (changedStrength) KeyLinkerFeature.VIBRATION else KeyLinkerFeature.IDLE_TIMEOUT
         model.previewKeyLinker(feature) { serials ->
-            val record = motor.withVibration(strength.toInt()).withShutdown(idle.toInt().takeIf { it > 0 })
+            val record = motor.withEdits(leftStrength, rightStrength, idle.toInt().takeIf { it > 0 })
             KeyLinkerClient.planMotor(record, serials, feature, summary, before = motor)
         }
     }

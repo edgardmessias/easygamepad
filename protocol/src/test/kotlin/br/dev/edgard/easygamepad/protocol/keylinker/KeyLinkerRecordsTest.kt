@@ -71,6 +71,39 @@ class KeyLinkerRecordsTest {
         assertThrows(IllegalArgumentException::class.java) { KeyLinkerMotorRecord(2, hex("4c4c")).shutdownMinutes }
     }
 
+    @Test fun idleOnlyEditPreservesAsymmetricMotorLevelsAndUnknownBytes() {
+        val record = KeyLinkerMotorRecord.parse(KeyLinkerBody.unwrap(hex("084dcc1234c0d40100")))
+        val edited = record.withEdits(shutdownMinutes = 5)
+        assertEquals(30, edited.leftPercent); assertEquals(80, edited.rightPercent)
+        assertArrayEquals(record.data.copyOfRange(0, 4), edited.data.copyOfRange(0, 4))
+        assertEquals(5, edited.shutdownMinutes)
+        assertEquals(record, KeyLinkerMotorRecord.parse(KeyLinkerBody.unwrap(record.payload())))
+        assertEquals(10, record.shutdownMinutes)
+    }
+
+    @Test fun motorEditsPreserveTheOtherMotorAndExactUnchangedTimeout() {
+        val record = KeyLinkerMotorRecord.parse(KeyLinkerBody.unwrap(hex("084dcc1234c1d40100")))
+        assertArrayEquals(record.payload(), record.withEdits().payload())
+        val left = record.withEdits(leftPercent = 60)
+        assertEquals(60, left.leftPercent)
+        assertArrayEquals(record.data.copyOfRange(1, 8), left.data.copyOfRange(1, 8))
+        val right = record.withEdits(rightPercent = 50)
+        assertEquals(record.data[0], right.data[0]); assertEquals(50, right.rightPercent)
+        assertArrayEquals(record.data.copyOfRange(2, 8), right.data.copyOfRange(2, 8))
+    }
+
+    @Test fun combinedMotorEditsRoundTripAndRejectInvalidValues() {
+        val record = KeyLinkerMotorRecord.parse(KeyLinkerBody.unwrap(hex("084dcc1234c0d40100")))
+        val edited = record.withEdits(60, 50, null)
+        val readBack = KeyLinkerMotorRecord.parse(KeyLinkerBody.unwrap(edited.payload()))
+        assertEquals(60, readBack.leftPercent); assertEquals(50, readBack.rightPercent)
+        assertNull(readBack.shutdownMinutes)
+        assertArrayEquals(hex("1234"), readBack.data.copyOfRange(2, 4))
+        assertThrows(IllegalArgumentException::class.java) { record.withEdits(leftPercent = -1) }
+        assertThrows(IllegalArgumentException::class.java) { record.withEdits(rightPercent = 101) }
+        assertThrows(IllegalArgumentException::class.java) { record.withEdits(shutdownMinutes = 31) }
+    }
+
     @Test fun keyListsStopAtTheirCount() {
         assertEquals(listOf(1, 2, 3, 4, 5, 6, 7, 8, 13, 14, 15, 16, 11, 12, 93, 94), KeyLinkerKeyList.decode(hex("1001880d840b825d82")))
         assertEquals(KeyLinkerKeyList.X20_MACRO_KEYS, KeyLinkerKeyList.decode(hex("1212130d8401880b825d82")))

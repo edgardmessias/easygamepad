@@ -251,6 +251,16 @@ data class KeyLinkerMotorRecord(val declared: Int, val data: ByteArray) {
         val copy = data.copyOf(); copy[0] = toLevel(percent).toByte(); copy[1] = toLevel(percent).toByte()
         return KeyLinkerMotorRecord(declared, copy)
     }
+    /** Apply editor values without quantizing or replacing fields that were not changed. */
+    fun withEdits(leftPercent: Int = this.leftPercent, rightPercent: Int = this.rightPercent,
+                  shutdownMinutes: Int? = this.shutdownMinutes): KeyLinkerMotorRecord {
+        require(leftPercent in 0..100 && rightPercent in 0..100) { "Vibration is 0-100%" }
+        val copy = data.copyOf()
+        if (leftPercent != this.leftPercent) copy[0] = toLevel(leftPercent).toByte()
+        if (rightPercent != this.rightPercent) copy[1] = toLevel(rightPercent).toByte()
+        val record = KeyLinkerMotorRecord(declared, copy)
+        return if (shutdownMinutes != this.shutdownMinutes) record.withShutdown(shutdownMinutes) else record
+    }
     fun withShutdown(minutes: Int?): KeyLinkerMotorRecord {
         require(data.size >= SHUTDOWN_OFFSET + 4) { "This motor record has no shutdown field" }
         val bytes = if (minutes == null) ByteArray(4) { 0xFF.toByte() } else {
