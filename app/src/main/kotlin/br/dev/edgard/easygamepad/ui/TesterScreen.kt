@@ -22,7 +22,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import br.dev.edgard.easygamepad.HubViewModel
+import br.dev.edgard.easygamepad.input.InputChipState
 import br.dev.edgard.easygamepad.input.InputState
+import br.dev.edgard.easygamepad.input.inputChipState
+import br.dev.edgard.easygamepad.input.selectedPadLabel
 import br.dev.edgard.easygamepad.protocol.PadKey
 import kotlin.math.abs
 import kotlin.math.sqrt
@@ -52,7 +55,7 @@ import java.util.Locale
                 (keys + state.tested.filter { code -> keys.none { it.first == code } }.sorted().map {
                     it to KeyEvent.keyCodeToString(it).removePrefix("KEYCODE_").removePrefix("BUTTON_")
                 }).forEach { (code, label) ->
-                    val pressed = code in state.pressed || when (code) {
+                    val live = code in state.pressed || when (code) {
                         KeyEvent.KEYCODE_DPAD_LEFT -> (state.axes[MotionEvent.AXIS_HAT_X] ?: 0f) < -.5f
                         KeyEvent.KEYCODE_DPAD_RIGHT -> (state.axes[MotionEvent.AXIS_HAT_X] ?: 0f) > .5f
                         KeyEvent.KEYCODE_DPAD_UP -> (state.axes[MotionEvent.AXIS_HAT_Y] ?: 0f) < -.5f
@@ -61,13 +64,27 @@ import java.util.Locale
                         KeyEvent.KEYCODE_BUTTON_R2 -> triggerAxis(state, MotionEvent.AXIS_RTRIGGER, MotionEvent.AXIS_GAS, KeyEvent.KEYCODE_BUTTON_R2) > .01f
                         else -> false
                     }
-                    Surface(shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, if (code in state.tested) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant), color = if (pressed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant) {
-                        Text(label, Modifier.padding(horizontal = 13.dp, vertical = 10.dp), color = if (pressed) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface)
+                    val chip = inputChipState(code, state, live)
+                    val border = when (chip) {
+                        InputChipState.LIVE -> MaterialTheme.colorScheme.primary
+                        InputChipState.TESTED -> MaterialTheme.colorScheme.primary
+                        InputChipState.IDLE -> MaterialTheme.colorScheme.outlineVariant
+                    }
+                    val fill = if (chip == InputChipState.LIVE) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+                    Surface(shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, border), color = fill) {
+                        Text(
+                            label,
+                            Modifier.padding(horizontal = 13.dp, vertical = 10.dp),
+                            color = if (chip == InputChipState.LIVE) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                        )
                     }
                 }
             }
-            Description(tr("Outlined buttons have already been tested. Rear buttons light up with the function assigned to them.", "A borda destacada marca os botões já testados. Os botões traseiros acendem junto com a função atribuída a eles."))
-            OutlinedButton(onClick = { model.app.input.reset() }) { Text(tr("Clear test", "Limpar teste")) }
+            Description(tr(
+                "Filled chips show a live press. Primary outlines mean you already tested that control. This mirrors Android input codes, not a remapped M1 label.",
+                "Chips preenchidos mostram um pressionamento ao vivo. Contorno primário indica que você já testou aquele controle. Isto espelha os códigos de entrada do Android, não um rótulo remapeado do M1.",
+            ))
+            OutlinedButton(onClick = { model.app.input.reset() }) { Text(tr("Reset tester", "Reiniciar teste")) }
         }
         if (state.axes.isNotEmpty()) TextButton(onClick = { details = !details }) {
             Text(if (details) tr("Hide technical details", "Ocultar detalhes técnicos") else tr("Technical details", "Detalhes técnicos"))
@@ -81,10 +98,17 @@ import java.util.Locale
         }
         if (details) state.pads.firstOrNull { it.id == state.selectedId }?.let { pad -> Mono("VID %04X  ·  PID %04X".format(pad.vendor, pad.product)) }
     }) {
-        ScreenHeading(tr("Live controller", "Controle ao vivo"), tr("Every move, on screen.", "Cada movimento na tela."))
+        ScreenHeading(
+            tr("Live controller", "Controle ao vivo"),
+            tr("Android input, not profile labels.", "Entrada do Android, não rótulos do perfil."),
+            tr("Hardware events appear here as the OS reports them.", "Eventos de hardware aparecem aqui como o sistema os reporta."),
+        )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatusPill(if (hasInput) tr("Game connected", "Jogo conectado") else tr("Waiting for controller", "Aguardando controle"), hasInput)
+            StatusPill(if (hasInput) tr("Input active", "Entrada ativa") else tr("No input selected", "Nenhuma entrada selecionada"), hasInput)
             StatusPill(tr("${state.tested.size} buttons tested", "${state.tested.size} botões testados"), state.tested.isNotEmpty(), color = MaterialTheme.colorScheme.secondary)
+        }
+        if (hasInput) {
+            selectedPadLabel(state, LocalPortuguese.current)?.let { Description(it) }
         }
         if (!hasInput) {
             InfoBanner(tr("Turn on your controller and connect it through Bluetooth or USB. Then choose it below to start testing.", "Ligue o controle e conecte por Bluetooth ou USB. Depois, escolha abaixo para começar o teste."))
@@ -101,7 +125,7 @@ import java.util.Locale
         HubCard(Modifier.fillMaxWidth()) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(controller?.name ?: tr("Controller preview", "Visual do controle"), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                TextButton(onClick = { model.app.input.reset() }, enabled = hasInput) { Text(tr("Clear", "Limpar")) }
+                TextButton(onClick = { model.app.input.reset() }, enabled = hasInput) { Text(tr("Reset", "Reiniciar")) }
             }
             if (controller?.artwork != null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected = !rear, onClick = { rear = false }, label = { Text(tr("Front", "Frente")) })
@@ -186,7 +210,8 @@ internal fun triggerAxis(state: InputState, primary: Int, fallback: Int, key: In
             drawLine(color.copy(alpha = .5f), center, center + Offset(x * radius, y * radius), 1.5.dp.toPx())
             drawCircle(color, 5.dp.toPx(), center + Offset(x.coerceIn(-1f, 1f) * radius, y.coerceIn(-1f, 1f) * radius))
         }
-        Mono(String.format(Locale.US, "X %+.3f", x)); Mono(String.format(Locale.US, "Y %+.3f", y))
+        Mono(tr("Live X ", "Ao vivo X ") + String.format(Locale.US, "%+.3f", x))
+        Mono(tr("Live Y ", "Ao vivo Y ") + String.format(Locale.US, "%+.3f", y))
         Description(tr("Offset ", "Desvio ") + String.format(Locale.US, "%.1f%%", sqrt(x * x + y * y) * 100))
     }
 }

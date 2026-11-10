@@ -86,9 +86,13 @@ class GamepadInput(context: Context) : InputManager.InputDeviceListener {
         }
         val old = sessions.snapshot(event.deviceId)
         sessions.update(event.deviceId, old.copy(axes = axes, events = old.events + 1, tested = old.tested + hats,
-            samples = (old.samples + ((axes[MotionEvent.AXIS_X] ?: 0f) to (axes[MotionEvent.AXIS_Y] ?: 0f))).takeLast(120),
-            rightSamples = (old.rightSamples + ((axes[MotionEvent.AXIS_Z] ?: axes[MotionEvent.AXIS_RX] ?: 0f) to
-                (axes[MotionEvent.AXIS_RZ] ?: axes[MotionEvent.AXIS_RY] ?: 0f))).takeLast(120)))
+            samples = StickTrails.append(old.samples, (axes[MotionEvent.AXIS_X] ?: 0f) to (axes[MotionEvent.AXIS_Y] ?: 0f)),
+            rightSamples = StickTrails.append(
+                old.rightSamples,
+                (axes[MotionEvent.AXIS_Z] ?: axes[MotionEvent.AXIS_RX] ?: 0f) to
+                    (axes[MotionEvent.AXIS_RZ] ?: axes[MotionEvent.AXIS_RY] ?: 0f),
+            ),
+        ))
         return true
     }
     fun rumble(): Boolean {

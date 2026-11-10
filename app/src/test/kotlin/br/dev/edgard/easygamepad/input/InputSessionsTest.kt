@@ -54,4 +54,67 @@ class InputSessionsTest {
         assertTrue(sessions.state.value.rightSamples.isEmpty())
         assertEquals(listOf(-.5f to .2f), sessions.snapshot(7).rightSamples)
     }
+
+    @Test
+    fun explicitSelectionDoesNotJumpToAnotherRuntimeId() {
+        val sessions = InputSessions()
+        sessions.refresh(pads)
+        sessions.select(3)
+        sessions.refresh(listOf(pads[1]))
+        assertNull(sessions.state.value.selectedId)
+        sessions.refresh(listOf(InputPad(99, "Replacement", 1, 2, false, "c")))
+        assertNull(sessions.state.value.selectedId)
+    }
+
+    @Test
+    fun ambiguousDescriptorsStayIsolatedPerRuntimeId() {
+        val sameName = listOf(
+            InputPad(10, "Wireless Controller", 1, 2, false, "a"),
+            InputPad(11, "Wireless Controller", 3, 4, false, "b"),
+        )
+        val sessions = InputSessions()
+        sessions.refresh(sameName)
+        sessions.select(10)
+        sessions.update(10, InputState(tested = setOf(96)))
+        sessions.update(11, InputState(tested = setOf(97)))
+        sessions.select(11)
+        assertEquals(setOf(97), sessions.state.value.tested)
+        sessions.select(10)
+        assertEquals(setOf(96), sessions.state.value.tested)
+    }
+
+    @Test
+    fun hatAxesMarkDpadAsTestedWithoutMergingDevices() {
+        val sessions = InputSessions()
+        sessions.refresh(pads)
+        sessions.select(3)
+        sessions.update(
+            3,
+            InputState(
+                axes = mapOf(15 to -1f, 16 to 0f),
+                tested = setOf(21),
+            ),
+        )
+        assertTrue(21 in sessions.state.value.tested)
+        sessions.update(7, InputState(tested = setOf(22)))
+        sessions.select(7)
+        assertEquals(setOf(22), sessions.state.value.tested)
+    }
+
+    @Test
+    fun learningCancelClearsPaddleWithoutAffectingBindings() {
+        val sessions = InputSessions()
+        sessions.refresh(pads)
+        sessions.select(3)
+        sessions.update(
+            3,
+            InputState(
+                learningPaddle = PadKey.M1,
+                paddleBindings = mapOf(PadKey.M2 to 99),
+            ),
+        )
+        sessions.update(3, sessions.snapshot(3).copy(learningPaddle = null))
+        assertNull(sessions.state.value.learningPaddle)
+        assertEquals(mapOf(PadKey.M2 to 99), sessions.state.value.paddleBindings)
+    }
 }
