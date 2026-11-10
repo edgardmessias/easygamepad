@@ -39,7 +39,9 @@ class CommandSession(private val transport: GamepadTransport, scope: CoroutineSc
                 if (waiting != null && frame[1].u8() == waiting.id) {
                     try {
                         if (waiting.accept(frame)) waiting.response.complete(frame)
-                    } catch (error: IllegalArgumentException) { waiting.response.completeExceptionally(error) }
+                    } catch (error: RuntimeException) {
+                        waiting.response.completeExceptionally(error)
+                    }
                 }
             }
         }
@@ -51,7 +53,11 @@ class CommandSession(private val transport: GamepadTransport, scope: CoroutineSc
         pending = Pending(id, response, accept)
         try {
             withTimeout(5000) {
-                transport.write(encoder.encode(id, payload))
+                try {
+                    transport.write(encoder.encode(id, payload))
+                } catch (writeError: Exception) {
+                    close(writeError); transport.abort(writeError); throw writeError
+                }
                 response.await()
             }
         } catch (error: TimeoutCancellationException) {
@@ -61,7 +67,8 @@ class CommandSession(private val transport: GamepadTransport, scope: CoroutineSc
         } catch (error: CancellationException) {
             close(error); transport.abort(error); throw error
         } catch (error: Exception) {
-            close(error); transport.abort(error); throw error
+            // Validation failures from accept() keep the session open for the next command.
+            throw error
         } finally { pending = null }
     }
 

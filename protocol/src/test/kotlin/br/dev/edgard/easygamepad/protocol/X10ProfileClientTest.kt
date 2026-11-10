@@ -156,12 +156,15 @@ class X10ProfileClientTest {
         assertFalse(pad.requests.any { it[1].u8() == 119 || it[1].u8() == 80 })
     }
 
-    @Test fun malformedReadbackIsUnconfirmedAndClosesTheSession() = runTest {
+    @Test fun malformedReadbackIsUnconfirmedAndKeepsTheSessionOpen() = runTest {
         val pad = Pad().apply { malformedSettings = true }
-        val result = X10ProfileClient(CommandSession(pad, backgroundScope)).apply(ControllerConfig())
+        val session = CommandSession(pad, backgroundScope)
+        val result = X10ProfileClient(session).apply(ControllerConfig())
         assertTrue(result is X10ApplyResult.Unconfirmed)
-        assertTrue(pad.aborted)
+        assertFalse(pad.aborted)
+        assertFalse(session.isClosed)
         assertEquals(listOf(1, 119), pad.requests.takeLast(2).map { it[1].u8() })
+        session.close()
     }
 
     @Test fun cancellationDuringReadbackIsNotConvertedToAResult() = runTest {

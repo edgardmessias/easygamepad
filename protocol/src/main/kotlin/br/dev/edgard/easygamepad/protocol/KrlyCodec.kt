@@ -25,14 +25,27 @@ class FrameDecoder {
         val frames = mutableListOf<ByteArray>()
         while (buffer.isNotEmpty()) {
             val length = buffer[0].u8()
-            if (length < 3) { buffer = buffer.drop(1).toByteArray(); continue }
+            if (length < MIN_FRAME_LENGTH || length > MAX_FRAME_LENGTH) {
+                buffer = buffer.drop(1).toByteArray()
+                continue
+            }
             if (buffer.size < length) break
             frames += buffer.copyOfRange(0, length)
             buffer = buffer.copyOfRange(length, buffer.size)
         }
+        if (buffer.size > MAX_RETAINED_BYTES) {
+            buffer = byteArrayOf()
+        }
         return frames
     }
     @Synchronized fun clear() { buffer = byteArrayOf() }
+
+    companion object {
+        const val MIN_FRAME_LENGTH = 3
+        const val MAX_FRAME_LENGTH = 255
+        const val MAX_BUFFER_BYTES = 512
+        const val MAX_RETAINED_BYTES = 255
+    }
 }
 
 object KrlyCodec {
@@ -87,7 +100,7 @@ class MappingPages {
     private var totalPages: Int? = null
     private var content = byteArrayOf()
     fun accept(raw: ByteArray): Map<PadKey, PadKey>? {
-        require(raw.size >= 5 && raw[1].u8() == 80)
+        require(raw.size >= 5 && raw[0].u8() == raw.size && raw[1].u8() == 80)
         val total = raw[2].u8(); val page = raw[3].u8()
         require(total in 0..64 && page <= total &&
             (if (expectedPage == null) page in 0..1 else page == expectedPage) &&
@@ -105,6 +118,7 @@ class MappingPages {
                 if (content[offset].u8() != 0) continue
                 val source = PadKey.from(content[offset + 1].u8()) ?: continue
                 val target = PadKey.from(content[offset + 2].u8()) ?: continue
+                require(!containsKey(source)) { "Duplicate mapping entry" }
                 put(source, target)
             }
         }

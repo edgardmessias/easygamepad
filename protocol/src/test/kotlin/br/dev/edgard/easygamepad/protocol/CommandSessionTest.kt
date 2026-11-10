@@ -65,6 +65,26 @@ class CommandSessionTest {
         transport.incoming.emit(bytes(4, 53, 2, 1)); runCurrent()
         assertTrue(operation.await().isFailure); session.close()
     }
+    @Test fun malformedMappingReplyFailsRequestAndCollectorKeepsWorking() = runTest {
+        val transport = FakeTransport()
+        val session = CommandSession(transport, backgroundScope)
+        val pages = MappingPages()
+        val operation = async {
+            runCatching { session.request(80, bytes(1)) { pages.accept(it) != null } }
+        }
+        runCurrent()
+        transport.incoming.emit(bytes(6, 80, 2, 2, 0, 9))
+        runCurrent()
+        assertTrue(operation.await().isFailure)
+        val followUp = async { session.ack(61, bytes(1, 160)) }
+        runCurrent()
+        transport.incoming.emit(bytes(4, 61, 0, 1))
+        runCurrent()
+        followUp.await()
+        assertFalse(session.isClosed)
+        session.close()
+    }
+
     @Test fun multipartRequestWaitsForLastPage() = runTest {
         val transport = FakeTransport(); val session = CommandSession(transport, backgroundScope)
         val pages = MappingPages(); var mappings: Map<PadKey, PadKey>? = null
