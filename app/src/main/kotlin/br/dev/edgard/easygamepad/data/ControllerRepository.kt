@@ -16,6 +16,8 @@ data class HardwareState(
     val appliedAt: Long? = null, val sleepMinutes: Int? = null,
     val settingsReadAt: Long? = null,
     val applyResult: X10ApplyResult? = null,
+    /** Config snapshot uploaded in the last apply attempt; kept separate from the live draft. */
+    val lastAppliedSnapshot: ControllerConfig? = null,
 )
 data class Notice(val english: String, val portuguese: String, val error: Boolean = false)
 
@@ -156,7 +158,7 @@ class ControllerRepository(val ble: BleClient, private val scope: CoroutineScope
         check(!state.value.calibration.stopRequired)
         config.validate()
         val active = connected()
-        mutableState.update { it.copy(appliedAt = null, applyResult = null) }
+        mutableState.update { it.copy(appliedAt = null, applyResult = null, lastAppliedSnapshot = config) }
         val result = X10ProfileClient(active).apply(config, uploadMode = { macroMode = it }, progress = { progress ->
             mutableState.update { it.copy(progress = progress) }
         })

@@ -45,7 +45,6 @@ import br.dev.edgard.easygamepad.ble.LinkPhase
 import br.dev.edgard.easygamepad.data.ProfileStore
 import br.dev.edgard.easygamepad.data.SavedProfile
 import br.dev.edgard.easygamepad.data.canAddSavedProfile
-import br.dev.edgard.easygamepad.data.x10ApplyNotice
 import br.dev.edgard.easygamepad.input.GamepadVibrationAvailability
 import br.dev.edgard.easygamepad.protocol.*
 import kotlinx.coroutines.Dispatchers
@@ -265,16 +264,10 @@ import kotlinx.coroutines.withContext
         OutlinedButton(onClick = { exportSnapshot = draft; export.launch("easygamepad-profile.json") }, enabled = editorUi.canSaveProfile, modifier = Modifier.fillMaxWidth()) { Text(tr("Export profile", "Exportar perfil")) }
         TextButton(onClick = { import.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }, modifier = Modifier.fillMaxWidth()) { Text(tr("Import profile from a file", "Importar perfil de um arquivo")) }
         hardware.applyResult?.let { result ->
-            val feedback = x10ApplyNotice(result)
-            OperationOutcome(
-                tr("Last apply result", "Resultado da última aplicação"),
-                tr(feedback.english, feedback.portuguese),
-                feedback.error,
-                hardware.appliedAt,
-                tr("Last settings read-back match: ", "Última conferência dos ajustes por releitura: "),
+            X10ApplyOutcomeCard(
+                hardware.lastAppliedSnapshot, result, hardware.appliedAt, hardware.settingsReadAt,
+                onReadFromDevice = { readDialog = true },
             )
-        } ?: hardware.appliedAt?.let {
-            Description(tr("Last settings read-back match: ", "Última conferência dos ajustes por releitura: ") + timeLabel(it))
         }
     }
     ProfileEditorBottomBar(
