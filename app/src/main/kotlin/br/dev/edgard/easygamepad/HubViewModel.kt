@@ -16,6 +16,7 @@ import br.dev.edgard.easygamepad.protocol.*
 import br.dev.edgard.easygamepad.protocol.keylinker.KeyLinkerFeature
 import br.dev.edgard.easygamepad.protocol.keylinker.KeyLinkerSerials
 import br.dev.edgard.easygamepad.protocol.keylinker.KeyLinkerWritePlan
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -24,6 +25,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import java.util.UUID
 
+@OptIn(FlowPreview::class)
 class HubViewModel(application: Application) : AndroidViewModel(application) {
     val app = application as HubApplication
     val repository = app.repository
@@ -54,6 +56,12 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     private val mutableSavedProfileId = MutableStateFlow<String?>(null)
     /** When set, the draft was loaded from this on-phone profile and can be updated in place. */
     val savedProfileId = mutableSavedProfileId.asStateFlow()
+    val draftDirty = combine(selectedId, draft, savedProfileId) { id, config, _ ->
+        drafts.isDirty(id, config)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val draftStatus = combine(draftDirty, savedProfileId) { dirty, linked ->
+        draftStatusKind(dirty, linked)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, DraftStatusKind.CLEAN)
     val tab = MutableStateFlow(0)
     val profileSection = MutableStateFlow(0)
     val connectionSheet = MutableStateFlow(false)
@@ -82,8 +90,24 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     init {
         viewModelScope.launch {
             val prefs = app.store.preferences.first()
+            drafts.restore(prefs.workspaceDrafts)
             selectedId.value = prefs.controllers.firstOrNull { it.address == prefs.address }?.let { "ble:${it.address}" }
                 ?: controllerDevices(prefs.controllers, app.input.state.value.pads).firstOrNull()?.id
+            selectedId.value?.let { id ->
+                prefs.workspaceDrafts[id]?.let { snap ->
+                    mutableDraft.value = snap.config
+                    mutableSavedProfileId.value = snap.linkedSavedProfileId
+                }
+            }
+        }
+        viewModelScope.launch {
+            combine(selectedId, draft, savedProfileId) { id, config, linked -> Triple(id, config, linked) }
+                .debounce(600)
+                .collect { (id, config, linked) ->
+                    if (id == null) return@collect
+                    drafts.remember(id, config, linked)
+                    runCatching { app.store.persistWorkspaceDrafts(drafts.export()) }
+                }
         }
         viewModelScope.launch {
             devices.collect { rows -> if (selectedId.value == null && rows.isNotEmpty()) selectedId.value = rows.first().id }
@@ -105,7 +129,11 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
                     app.store.device(state.address, connectingGatt ?: preferences.value.gatt, descriptor, connectingModel)
                     if (selectionRevision != revision || switching.value || manuallyDisconnected ||
                         ble.link.value.phase != LinkPhase.READY || ble.link.value.address != state.address) return@collect
-                    if (previousId != target) mutableDraft.value = drafts.switch(previousId, target, mutableDraft.value, previousId == SETUP_ID)
+                    if (previousId != target) {
+                        val switched = drafts.switch(previousId, target, mutableDraft.value, savedProfileId.value, previousId == SETUP_ID)
+                        mutableDraft.value = switched.config
+                        mutableSavedProfileId.value = switched.linkedSavedProfileId
+                    }
                     selectedId.value = target
                     setupInput.value = null
                 }
@@ -136,7 +164,9 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 disconnectJob?.join()
                 repository.disconnect()
-                mutableDraft.value = drafts.switch(selectedId.value, id, mutableDraft.value)
+                val switched = drafts.switch(selectedId.value, id, mutableDraft.value, savedProfileId.value)
+                mutableDraft.value = switched.config
+                mutableSavedProfileId.value = switched.linkedSavedProfileId
                 manuallyDisconnected = false
                 setupInput.value = descriptor
                 setupGatt.value = null
@@ -197,18 +227,26 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
         it.supportsKeyLinker && !switching.value && it.address != null && it.address == ble.link.value.address &&
             ble.link.value.phase == LinkPhase.READY && ble.link.value.protocol == ConfigurationProtocol.KEYLINKER
     } == true
-    fun edit(update: (ControllerConfig) -> ControllerConfig) { mutableDraft.update(update) }
+    fun edit(update: (ControllerConfig) -> ControllerConfig) {
+        mutableDraft.update(update)
+        selectedId.value?.let { drafts.remember(it, mutableDraft.value, savedProfileId.value) }
+    }
     fun load(config: ControllerConfig) {
         mutableDraft.value = config
         mutableSavedProfileId.value = null
+        drafts.adoptBaseline(selectedId.value, config, null)
         tab.value = 1
     }
     fun loadSaved(profile: SavedProfile) {
         mutableDraft.value = profile.config
         mutableSavedProfileId.value = profile.id
+        drafts.adoptBaseline(selectedId.value, profile.config, profile.id)
         tab.value = 1
     }
-    fun clearSavedProfileLink() { mutableSavedProfileId.value = null }
+    fun clearSavedProfileLink() {
+        mutableSavedProfileId.value = null
+        drafts.clearSavedLink(selectedId.value)
+    }
     fun language(tag: String) { viewModelScope.launch {
         app.store.language(tag)
         if (Build.VERSION.SDK_INT >= 33) app.getSystemService(LocaleManager::class.java).applicationLocales =
@@ -329,7 +367,10 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     fun updateSavedCopy() {
         val id = savedProfileId.value ?: return
         viewModelScope.launch { runCatching { app.store.save(SavedProfile(id, draft.value)) }
-            .onSuccess { repository.notice("Saved profile updated", "Perfil salvo atualizado") }
+            .onSuccess {
+                drafts.markSaved(selectedId.value, draft.value, id)
+                repository.notice("Saved profile updated", "Perfil salvo atualizado")
+            }
             .onFailure { e -> profileSaveFailureNotice(e) } }
     }
     fun saveAsNewCopy() {
@@ -341,6 +382,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { runCatching { app.store.save(SavedProfile(id, draft.value)) }
             .onSuccess {
                 mutableSavedProfileId.value = id
+                drafts.markSaved(selectedId.value, draft.value, id)
                 repository.notice("Profile saved on this phone", "Perfil salvo neste celular")
             }
             .onFailure { e -> profileSaveFailureNotice(e) } }
@@ -371,6 +413,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     fun importProfile(json: String) { runCatching { ProfileStore.import(json) }.onSuccess {
         mutableDraft.value = it
         mutableSavedProfileId.value = null
+        drafts.adoptBaseline(selectedId.value, it, null)
         tab.value = 1
         repository.notice("Profile imported. Save it or apply it to your controller when ready.", "Perfil importado. Salve ou aplique ao controle quando quiser.")
     }.onFailure { repository.notice("Invalid or incompatible profile file", "Arquivo de perfil inválido ou incompatível", true) } }

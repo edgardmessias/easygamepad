@@ -42,6 +42,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import br.dev.edgard.easygamepad.HubViewModel
 import br.dev.edgard.easygamepad.data.ControllerArtworkCatalog
 import br.dev.edgard.easygamepad.ble.LinkPhase
+import br.dev.edgard.easygamepad.data.DraftStatusKind
 import br.dev.edgard.easygamepad.data.ProfileStore
 import br.dev.edgard.easygamepad.data.SavedProfile
 import br.dev.edgard.easygamepad.data.canAddSavedProfile
@@ -70,6 +71,7 @@ import kotlinx.coroutines.withContext
     val actionSpace = if (bottomBarHeightPx > 0) measuredInset else fallbackInset
     val section by model.profileSection.collectAsStateWithLifecycle()
     val savedProfileId by model.savedProfileId.collectAsStateWithLifecycle()
+    val draftStatus by model.draftStatus.collectAsStateWithLifecycle()
     val canSaveNewCopy = canAddSavedProfile(prefs.profiles)
     val profileScroll = rememberScrollState()
     val sectionLabels = listOf(tr("Buttons", "Botões"), tr("Sticks", "Analógicos"), tr("Triggers", "Gatilhos"), tr("Macros", "Macros"), tr("Turbo", "Turbo"), tr("Vibration", "Vibração"))
@@ -270,11 +272,15 @@ import kotlinx.coroutines.withContext
             )
         }
     }
+    val statusHint = when (draftStatus) {
+        DraftStatusKind.UNSAVED_CHANGES -> tr("Unsaved changes. Save or update your copy before loading another profile.", "Alterações não salvas. Salve ou atualize sua cópia antes de carregar outro perfil.")
+        DraftStatusKind.NEW -> tr("New draft with unsaved edits. Applying sends to the controller; saving keeps a copy on this phone.", "Rascunho novo com alterações não salvas. Aplicar envia ao controle; salvar guarda uma cópia neste celular.")
+        DraftStatusKind.EDITING_SAVED -> tr("Matches the saved copy you loaded. Apply sends changes to the controller.", "Igual à cópia salva carregada. Aplicar envia as mudanças ao controle.")
+        DraftStatusKind.CLEAN -> tr("Edits reach your controller when you apply.", "Os ajustes só mudam no controle ao aplicar.")
+    }
     ProfileEditorBottomBar(
-        if (!draftValid) profileSaveBlockedReason(validationIssues)
-            ?: tr("Edits reach your controller when you apply.", "Os ajustes só mudam no controle ao aplicar.")
-        else tr("Edits reach your controller when you apply.", "Os ajustes só mudam no controle ao aplicar."),
-        showHint = !shortWindow || !draftValid,
+        if (!draftValid) profileSaveBlockedReason(validationIssues) ?: statusHint else statusHint,
+        showHint = !shortWindow || !draftValid || draftStatus != DraftStatusKind.CLEAN,
         editingSavedCopy = savedProfileId != null,
         canSave = editorUi.canSaveProfile,
         canApply = editorUi.canApplyToDevice,

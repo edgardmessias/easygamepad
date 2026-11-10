@@ -43,6 +43,7 @@ fun loadHubPreferences(
     profilesJson: String?,
     controllersJson: String?,
     inputNamesJson: String?,
+    workspaceDraftsJson: String? = null,
     storageIoError: Boolean = false,
 ): HubPreferencesSnapshot {
     val gatt = GattProfile(service ?: GattProfile().service, write ?: GattProfile().write, notify ?: GattProfile().notify)
@@ -56,6 +57,7 @@ fun loadHubPreferences(
         )
         else -> DecodedCollection(emptyList())
     }
+    val workspaceDrafts = decodeWorkspaceDraftsLenient(workspaceDraftsJson ?: "{}")
     val warnings = profiles.warnings + controllers.warnings + inputWarnings
     val prefs = HubPreferences(
         language = language ?: "auto",
@@ -67,6 +69,7 @@ fun loadHubPreferences(
         inputNames = inputMap,
         storageWarnings = warnings,
         storageIoError = storageIoError,
+        workspaceDrafts = workspaceDrafts,
     )
     return HubPreferencesSnapshot(prefs, warnings, storageIoError)
 }
@@ -169,6 +172,22 @@ fun encodeControllers(rows: List<SavedController>, preservedSlots: List<Preserve
     }
 }.toString()
 
+fun encodeWorkspaceDrafts(workspaces: Map<String, ControllerDraftSnapshot>): String {
+    val root = JSONObject()
+    workspaces.entries.take(WORKSPACE_DRAFT_LIMIT).forEach { (id, snap) ->
+        root.put(
+            id,
+            JSONObject()
+                .put("config", ProfileExportCodec.encodeConfig(snap.config))
+                .put("baseline", ProfileExportCodec.encodeConfig(snap.baseline))
+                .put("savedProfileId", snap.linkedSavedProfileId ?: JSONObject.NULL),
+        )
+    }
+    val json = root.toString()
+    require(json.toByteArray(Charsets.UTF_8).size <= WORKSPACE_JSON_LIMIT) { "Workspace drafts exceed size limit" }
+    return json
+}
+
 fun rewriteProfilesJson(current: String?, transform: (List<SavedProfile>) -> List<SavedProfile>): String {
     val decoded = decodeProfilesLenient(current ?: "[]")
     return encodeProfiles(transform(decoded.items), decoded.preservedSlots)
@@ -190,5 +209,21 @@ fun backupUnreadableControllersRoot(prefs: MutablePreferences, decoded: DecodedC
     decoded.preservedRootJson?.let { prefs[backup] = it }
 }
 
+fun decodeWorkspaceDraftsLenient(json: String): Map<String, ControllerDraftSnapshot> = try {
+    val root = JSONObject(json)
+    buildMap {
+        root.keys().forEach { id ->
+            runCatching {
+                val row = root.getJSONObject(id)
+                val config = ProfileExportCodec.decodeConfig(row.getJSONObject("config"))
+                val baseline = ProfileExportCodec.decodeConfig(row.getJSONObject("baseline"))
+                val linked = if (row.isNull("savedProfileId")) null else row.getString("savedProfileId")
+                put(id, ControllerDraftSnapshot(config, baseline, linked))
+            }
+        }
+    }.entries.take(WORKSPACE_DRAFT_LIMIT).associate { it.toPair() }
+} catch (_: Exception) {
+    emptyMap()
+}
 
 class StoragePersistenceException(cause: Throwable) : Exception(cause)

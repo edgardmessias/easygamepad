@@ -20,6 +20,7 @@ data class HubPreferences(
     val inputNames: Map<String, String> = emptyMap(),
     val storageWarnings: List<StorageLoadWarning> = emptyList(),
     val storageIoError: Boolean = false,
+    val workspaceDrafts: Map<String, ControllerDraftSnapshot> = emptyMap(),
 )
 
 class ProfileStore(context: Context) {
@@ -57,6 +58,7 @@ class ProfileStore(context: Context) {
             values[stringPreferencesKey("profiles")],
             values[stringPreferencesKey("controllers")],
             values[stringPreferencesKey("inputNames")],
+            values[stringPreferencesKey("workspace_drafts")],
             ioError,
         ).preferences
     }
@@ -183,6 +185,12 @@ class ProfileStore(context: Context) {
             val decoded = decodeProfilesLenient(current ?: "[]")
             backupUnreadableProfilesRoot(it, decoded)
             it[stringPreferencesKey("profiles")] = rewriteProfilesJson(current) { rows -> rows.filterNot { p -> p.id == id } }
+        }
+    }
+
+    suspend fun persistWorkspaceDrafts(workspaces: Map<String, ControllerDraftSnapshot>) {
+        editStore {
+            it[stringPreferencesKey("workspace_drafts")] = encodeWorkspaceDrafts(workspaces)
         }
     }
 
