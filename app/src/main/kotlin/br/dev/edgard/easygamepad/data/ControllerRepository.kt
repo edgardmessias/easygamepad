@@ -21,46 +21,74 @@ data class HardwareState(
 )
 data class Notice(val english: String, val portuguese: String, val error: Boolean = false)
 
-class ControllerRepository(val ble: BleClient, private val scope: CoroutineScope) {
+class ControllerRepository internal constructor(
+    private val transport: GamepadTransport,
+    private val link: StateFlow<LinkState>,
+    private val scope: CoroutineScope,
+    private val log: (String, String) -> Unit,
+    private val onDisconnect: suspend () -> Unit,
+) {
+    constructor(ble: BleClient, scope: CoroutineScope) : this(
+        ble, ble.link, scope, ble::log,
+        onDisconnect = { ble.stopScan(); ble.disconnect() },
+    )
+
+    private class KrlyConnection(val address: String, val session: CommandSession)
+
     private val mutableState = MutableStateFlow(HardwareState())
     val state = mutableState.asStateFlow()
     private val mutableNotices = MutableSharedFlow<Notice>(extraBufferCapacity = 10)
     val notices = mutableNotices.asSharedFlow()
-    private var session: CommandSession? = null
+    private var connection: KrlyConnection? = null
     private var eventsJob: Job? = null
     private var pollingJob: Job? = null
     private var calibrationTimeout: Job? = null
     private var macroMode = false
     private val exclusive = Mutex()
 
+    private fun isCurrent(active: KrlyConnection): Boolean = connection === active && link.value.let {
+        it.phase == LinkPhase.READY && it.protocol == ConfigurationProtocol.KRLY && it.address == active.address
+    }
+
     init {
         scope.launch {
             // KRLY commands go only to links opened for the X10 (QMacro). A KeyLinker link is never polled here.
-            ble.link.map { it.phase == LinkPhase.READY && it.protocol == ConfigurationProtocol.KRLY }.distinctUntilChanged().collect { krlyReady ->
-                if (krlyReady) {
-                    val active = CommandSession(ble, scope)
-                    session = active
-                    eventsJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
-                        active.events.collect { frame ->
-                            KrlyCodec.battery(frame)?.let { battery -> mutableState.update { it.copy(battery = battery) } }
-                            mutableState.update { it.copy(calibration = KrlyCodec.calibration(it.calibration, frame)) }
-                        }
-                    }
-                    pollingJob = scope.launch {
-                        refreshBattery()
-                        while (isActive) { delay(180000); if (!mutableState.value.calibration.stopRequired) refreshBattery() }
-                    }
-                } else {
-                    session?.close(); session = null
-                    pollingJob?.cancel(); eventsJob?.cancel(); calibrationTimeout?.cancel()
+            link.map { state ->
+                state.address.takeIf { state.phase == LinkPhase.READY && state.protocol == ConfigurationProtocol.KRLY }
+            }.distinctUntilChanged().collect { address ->
+                eventsJob?.cancel()
+                pollingJob?.cancel()
+                calibrationTimeout?.cancel()
+                connection?.session?.close()
+                connection = null
+                if (address == null) {
                     mutableState.update { old -> HardwareState(calibration = if (old.calibration.stopRequired)
                         old.calibration.copy(phase = CalibrationPhase.FAILED, stopRequired = false) else old.calibration) }
+                    return@collect
+                }
+                lateinit var active: KrlyConnection
+                val bound = ConnectionBoundTransport(transport) { isCurrent(active) }
+                active = KrlyConnection(address, CommandSession(bound, scope))
+                connection = active
+                eventsJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    active.session.events.collect { frame ->
+                        if (!isCurrent(active)) return@collect
+                        KrlyCodec.battery(frame)?.let { battery -> mutableState.update { it.copy(battery = battery) } }
+                        mutableState.update { it.copy(calibration = KrlyCodec.calibration(it.calibration, frame)) }
+                    }
+                }
+                pollingJob = scope.launch {
+                    if (isCurrent(active)) refreshBattery()
+                    while (isActive) {
+                        delay(180000)
+                        if (isCurrent(active) && !mutableState.value.calibration.stopRequired) refreshBattery()
+                    }
                 }
             }
         }
     }
     fun notice(en: String, pt: String, error: Boolean = false) { mutableNotices.tryEmit(Notice(en, pt, error)) }
-    private fun connected() = checkNotNull(session) { "Controller not connected" }
+    private fun connected() = checkNotNull(connection?.session) { "Controller not connected" }
     private suspend fun withVibrationPreview(quiet: Boolean, block: suspend (CommandSession) -> Unit): Boolean {
         return try {
             exclusive.withLock {
@@ -71,18 +99,18 @@ class ControllerRepository(val ble: BleClient, private val scope: CoroutineScope
         } catch (cancel: CancellationException) {
             throw cancel
         } catch (error: Exception) {
-            ble.log("VIBRATION", error.message ?: error.javaClass.simpleName)
+            log("VIBRATION", error.message ?: error.javaClass.simpleName)
             if (!quiet) notice("The controller did not confirm this operation. Check the connection and diagnostics.",
                 "O controle não confirmou a operação. Verifique a conexão e o diagnóstico.", true)
             false
         }
     }
     suspend fun holdX10VibrationPreview(motor: X10Motor, intensity: Int): Boolean {
-        ble.log("VIBRATION", "Holding X10 motor $motor at $intensity")
+        log("VIBRATION", "Holding X10 motor $motor at $intensity")
         return withVibrationPreview(quiet = true) { X10VibrationPreview(it).hold(motor, intensity) }
     }
     suspend fun stopX10VibrationPreview(): Boolean {
-        ble.log("VIBRATION", "Stopping X10 motor preview")
+        log("VIBRATION", "Stopping X10 motor preview")
         return withVibrationPreview(quiet = true) { X10VibrationPreview(it).stop() }
     }
     fun stopX10VibrationPreviewAsync() {
@@ -99,7 +127,7 @@ class ControllerRepository(val ble: BleClient, private val scope: CoroutineScope
             null
         } catch (cancel: CancellationException) { throw cancel }
         catch (error: Exception) {
-            ble.log("ERROR", error.message ?: error.javaClass.simpleName)
+            log("ERROR", error.message ?: error.javaClass.simpleName)
             notice("The controller did not confirm this operation. Check the connection and diagnostics.",
                 "O controle não confirmou a operação. Verifique a conexão e o diagnóstico.", true)
             null
@@ -138,10 +166,10 @@ class ControllerRepository(val ble: BleClient, private val scope: CoroutineScope
             runOperation(false) {
                 check(!state.value.calibration.stopRequired)
                 val active = connected()
-                ble.log("VIBRATION", "Testing X10 motor $motor with value $intensity")
+                log("VIBRATION", "Testing X10 motor $motor with value $intensity")
                 val result = X10VibrationTest(active).run(motor, intensity)
                 completed = true
-                ble.log("VIBRATION", "Motor $motor test exchanges completed; readable settings unchanged: ${result.settingsUnchanged}; physical result not checked")
+                log("VIBRATION", "Motor $motor test exchanges completed; readable settings unchanged: ${result.settingsUnchanged}; physical result not checked")
                 if (result.settingsUnchanged) {
                     if (!quiet) notice("Test sent to X10; readable settings are unchanged.",
                         "Teste enviado ao X10; os ajustes legíveis não mudaram.")
@@ -166,7 +194,7 @@ class ControllerRepository(val ble: BleClient, private val scope: CoroutineScope
         mutableState.update { it.copy(applyResult = result, progress = 1f,
             appliedAt = now.takeIf { result is X10ApplyResult.Matched },
             settingsReadAt = if (result is X10ApplyResult.Unconfirmed) it.settingsReadAt else now) }
-        ble.log("READBACK", when (result) {
+        log("READBACK", when (result) {
             is X10ApplyResult.Matched -> "X10 readable settings match; macros and power-cycle persistence not checked"
             is X10ApplyResult.Mismatch -> "X10 settings mismatch: ${result.fields.joinToString()}"
             is X10ApplyResult.Unconfirmed -> "X10 settings unconfirmed: ${result.reason}"
@@ -215,11 +243,11 @@ class ControllerRepository(val ble: BleClient, private val scope: CoroutineScope
         mutableState.update { it.copy(appliedAt = null) }
     }
     suspend fun disconnect() {
-        if (state.value.calibration.stopRequired && ble.link.value.phase == LinkPhase.READY) stopCalibration()
-        if (macroMode && ble.link.value.phase == LinkPhase.READY) {
-            runCatching { withTimeout(5500) { session?.ack(1, bytes(0)) } }
+        if (state.value.calibration.stopRequired && link.value.phase == LinkPhase.READY) stopCalibration()
+        if (macroMode && link.value.phase == LinkPhase.READY) {
+            runCatching { withTimeout(5500) { connection?.session?.ack(1, bytes(0)) } }
         }
         macroMode = false
-        ble.stopScan(); ble.disconnect()
+        onDisconnect()
     }
 }
