@@ -19,8 +19,6 @@ data class HardwareState(
     /** Config snapshot uploaded in the last apply attempt; kept separate from the live draft. */
     val lastAppliedSnapshot: ControllerConfig? = null,
 )
-data class Notice(val english: String, val portuguese: String, val error: Boolean = false)
-
 class ControllerRepository internal constructor(
     private val transport: GamepadTransport,
     private val link: StateFlow<LinkState>,
@@ -87,7 +85,10 @@ class ControllerRepository internal constructor(
             }
         }
     }
-    fun notice(en: String, pt: String, error: Boolean = false) { mutableNotices.tryEmit(Notice(en, pt, error)) }
+    fun notice(en: String, pt: String, error: Boolean = false, survivesDisconnect: Boolean = false) {
+        mutableNotices.tryEmit(Notice(en, pt, error, survivesDisconnect))
+    }
+    fun notice(notice: Notice) { mutableNotices.tryEmit(notice) }
     private fun connected() = checkNotNull(connection?.session) { "Controller not connected" }
     private suspend fun withVibrationPreview(quiet: Boolean, block: suspend (CommandSession) -> Unit): Boolean {
         return try {

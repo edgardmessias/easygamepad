@@ -71,6 +71,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     val hardware = repository.state
     val keyLinker = app.keyLinker.state
     private val operationGate = ControllerOperationGate(hardware, keyLinker, switching)
+    val noticePresenter = NoticePresenter()
     val canSwitchController = operationGate.canSwitch.stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val input = app.input.state
     val vibrationTestAvailability = input.map { it.vibrationAvailability() }.distinctUntilChanged()
@@ -91,6 +92,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     val x10VibrationPreview = vibrationPreviewActivity.asStateFlow()
 
     init {
+        viewModelScope.launch { ble.link.collect { noticePresenter.onLinkPhase(it.phase) } }
         viewModelScope.launch {
             val prefs = app.store.preferences.first()
             drafts.restore(prefs.workspaceDrafts)
@@ -220,12 +222,15 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
                     if (pad.descriptor.isNotBlank() && pads.count { it.descriptor == pad.descriptor } == 1) app.store.renameInput(pad.descriptor, name)
                     else {
                         sessionNames.update { it + ("${pad.id}:${pad.descriptor}" to name) }
-                        repository.notice("Name saved for this session. Android reports the same identity for these controllers.",
-                            "Nome salvo para esta sessão. O Android identifica esses controles da mesma forma.")
+                        repository.notice(
+                            "Name saved for this session. Android reports the same identity for these controllers.",
+                            "Nome salvo para esta sessão. O Android identifica esses controles da mesma forma.",
+                            survivesDisconnect = true,
+                        )
                         return@launch
                     }
                 }
-                repository.notice("Controller renamed", "Nome do controle alterado")
+                repository.notice("Controller renamed", "Nome do controle alterado", survivesDisconnect = true)
             }.onFailure { repository.notice("Could not save the name. Try again.", "Não foi possível salvar o nome. Tente novamente.", true) }
         }
     }
@@ -328,14 +333,14 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
         val address = selectedDevice.value?.address ?: return
         val identified = keyLinker.value.identifiedModelId ?: return
         viewModelScope.launch { runCatching { app.store.model(address, identified) }
-            .onSuccess { repository.notice("Saved as the identified model", "Salvo como o modelo identificado") } }
+            .onSuccess { repository.notice("Saved as the identified model", "Salvo como o modelo identificado", survivesDisconnect = true) } }
     }
     fun saveGatt(gatt: GattProfile) { runCatching {
         listOf(gatt.service, gatt.write, gatt.notify).forEach { UUID.fromString(it) }
     }.onSuccess { viewModelScope.launch {
         val address = selectedDevice.value?.address
         if (address != null) app.store.device(address, gatt) else setupGatt.value = gatt
-        repository.notice("Connection profile saved", "Perfil de conexão salvo")
+        repository.notice("Connection profile saved", "Perfil de conexão salvo", survivesDisconnect = true)
     } }.onFailure { repository.notice("Enter three valid UUIDs", "Informe três UUIDs válidos", true) } }
     /** Only reconnect the last verified configuration address, never an arbitrary paired pad. */
     fun foreground(active: Boolean) {
@@ -426,7 +431,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { runCatching { app.store.save(SavedProfile(id, snapshot)) }
             .onSuccess {
                 finishProfileSave(binding, snapshot, id, newCopy = false)
-                repository.notice("Saved profile updated", "Perfil salvo atualizado")
+                repository.notice("Saved profile updated", "Perfil salvo atualizado", survivesDisconnect = true)
             }
             .onFailure { e -> profileSaveFailureNotice(e) } }
     }
@@ -441,7 +446,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { runCatching { app.store.save(SavedProfile(id, snapshot)) }
             .onSuccess {
                 finishProfileSave(binding, snapshot, id, newCopy = true)
-                repository.notice("Profile saved on this phone", "Perfil salvo neste celular")
+                repository.notice("Profile saved on this phone", "Perfil salvo neste celular", survivesDisconnect = true)
             }
             .onFailure { e -> profileSaveFailureNotice(e) } }
     }
@@ -483,6 +488,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
             repository.notice(
                 "Profile imported. Save it or apply it to your controller when ready.",
                 "Perfil importado. Salve ou aplique ao controle quando quiser.",
+                survivesDisconnect = true,
             )
         }.onFailure { repository.notice("Invalid or incompatible profile file", "Arquivo de perfil inválido ou incompatível", true) }
     }

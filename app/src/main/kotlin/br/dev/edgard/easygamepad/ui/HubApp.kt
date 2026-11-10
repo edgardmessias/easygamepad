@@ -96,7 +96,15 @@ import java.util.Locale
         val snackbar = remember { SnackbarHostState() }
         val latestPortuguese by rememberUpdatedState(LocalPortuguese.current)
         var permissionDenied by remember { mutableStateOf(false) }
-        LaunchedEffect(model) { model.repository.notices.collect { snackbar.showSnackbar(if (latestPortuguese) it.portuguese else it.english) } }
+        LaunchedEffect(model) {
+            model.repository.notices.collect { notice ->
+                val message = model.noticePresenter.present(notice, latestPortuguese) ?: return@collect
+                snackbar.showSnackbar(
+                    message = message.text,
+                    duration = if (message.longLived) SnackbarDuration.Long else SnackbarDuration.Short,
+                )
+            }
+        }
         val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
             permissionDenied = !grants.values.all { it }
             if (!permissionDenied) model.scan()

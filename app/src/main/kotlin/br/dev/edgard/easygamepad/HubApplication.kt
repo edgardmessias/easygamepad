@@ -16,7 +16,7 @@ class HubApplication : Application() {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val ble by lazy { BleClient(this, scope) }
     val repository by lazy { ControllerRepository(ble, scope) }
-    val keyLinker by lazy { KeyLinkerRepository(ble, scope) { repository.notice(it.english, it.portuguese, it.error) } }
+    val keyLinker by lazy { KeyLinkerRepository(ble, scope, repository::notice) }
     val store by lazy { ProfileStore(this) }
     val input by lazy { GamepadInput(this) }
 }

@@ -9,6 +9,7 @@ fun x10ApplyNotice(result: X10ApplyResult): Notice = when (result) {
     is X10ApplyResult.Matched -> Notice(
         "Buttons, sticks, triggers, vibration and turbo match the read-back. Macro sequences and persistence after power-off were not checked.",
         "Botões, analógicos, gatilhos, vibração e turbo conferem na releitura. As sequências de macro e a persistência após desligar não foram verificadas.",
+        kind = NoticeKind.OUTCOME,
     )
     is X10ApplyResult.Mismatch -> {
         val names = result.fields.map { field -> when (field) {

@@ -96,7 +96,7 @@ import kotlinx.coroutines.withContext
         if (uri != null && snapshot != null) scope.launch {
             runCatching { withContext(Dispatchers.IO) {
                 requireNotNull(context.contentResolver.openOutputStream(uri)).bufferedWriter().use { it.write(ProfileStore.export(snapshot)) }
-            } }.onSuccess { model.repository.notice("Profile exported", "Perfil exportado") }
+            } }.onSuccess { model.repository.notice("Profile exported", "Perfil exportado", survivesDisconnect = true) }
                 .onFailure { model.repository.notice("Could not export profile", "Não foi possível exportar o perfil", true) }
         }
     }

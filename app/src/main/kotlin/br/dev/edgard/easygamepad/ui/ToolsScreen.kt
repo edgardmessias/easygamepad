@@ -14,8 +14,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import br.dev.edgard.easygamepad.BuildConfig
 import br.dev.edgard.easygamepad.HubViewModel
 import br.dev.edgard.easygamepad.ble.LinkPhase
+import br.dev.edgard.easygamepad.data.DiagnosticsSanitizer
 import br.dev.edgard.easygamepad.protocol.*
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -30,6 +32,7 @@ import java.util.Locale
     var reset by remember { mutableStateOf(false) }
     var showLogs by rememberSaveable { mutableStateOf(false) }
     var versionDetails by rememberSaveable { mutableStateOf(false) }
+    var includeRawPayloads by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     val cal = state.calibration
     val ready = link.phase == LinkPhase.READY
@@ -106,14 +109,29 @@ import java.util.Locale
                 Text(tr("Connection diagnostics", "Diagnóstico da conexão"), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                 TextButton(onClick = { showLogs = !showLogs }) { Text(if (showLogs) tr("Hide", "Ocultar") else tr("View", "Ver")) }
             }
-            Description(tr("Having trouble connecting? Share this connection history to help investigate.", "Problemas para conectar? Compartilhe o histórico da conexão para ajudar a investigar."))
+            Description(tr(
+                "Connection history is sanitized by default. Enable raw payloads only when a maintainer needs packet detail.",
+                "O histórico é sanitizado por padrão. Ative cargas brutas só quando um mantenedor precisar de detalhe de pacotes.",
+            ))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = includeRawPayloads, onCheckedChange = { includeRawPayloads = it })
+                Text(tr("Include raw payloads when sharing", "Incluir cargas brutas ao compartilhar"))
+            }
             if (showLogs) {
                 if (logs.isEmpty()) Description(tr("No messages yet.", "Nenhuma mensagem ainda."))
-                logs.takeLast(35).forEach { log -> Mono("${SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(log.time))} ${log.direction} ${log.message}") }
+                logs.takeLast(35).forEach { log ->
+                    val body = DiagnosticsSanitizer.sanitizeLine(log.message, includeRawPayloads)
+                    Mono("${SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(log.time))} ${log.direction} $body")
+                }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = {
-                    val text = "EasyGamepad ${br.dev.edgard.easygamepad.BuildConfig.VERSION_NAME}\nAndroid ${android.os.Build.VERSION.RELEASE}\n" + logs.joinToString("\n") { "${it.time} ${it.direction} ${it.message}" }
+                    val text = DiagnosticsSanitizer.buildExport(
+                        BuildConfig.VERSION_NAME,
+                        android.os.Build.VERSION.RELEASE,
+                        logs,
+                        includeRawPayloads,
+                    )
                     context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), null))
                 }, enabled = logs.isNotEmpty()) { Text(tr("Share history", "Compartilhar histórico")) }
                 TextButton(onClick = model.ble::clearLogs) { Text(tr("Clear", "Limpar")) }
