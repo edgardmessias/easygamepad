@@ -36,12 +36,15 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import br.dev.edgard.easygamepad.HubViewModel
 import br.dev.edgard.easygamepad.data.ControllerArtworkCatalog
 import br.dev.edgard.easygamepad.ble.LinkPhase
 import br.dev.edgard.easygamepad.data.ProfileStore
+import br.dev.edgard.easygamepad.data.SavedProfile
+import br.dev.edgard.easygamepad.data.canAddSavedProfile
 import br.dev.edgard.easygamepad.data.x10ApplyNotice
 import br.dev.edgard.easygamepad.input.GamepadVibrationAvailability
 import br.dev.edgard.easygamepad.protocol.*
@@ -61,8 +64,14 @@ import kotlinx.coroutines.withContext
     val scope = rememberCoroutineScope()
     val layout = LocalWindowLayout.current
     val shortWindow = layout.shortHeight
-    val actionSpace = profilesEditorBottomInset(shortWindow, LocalDensity.current.fontScale)
+    val density = LocalDensity.current
+    var bottomBarHeightPx by remember { mutableIntStateOf(0) }
+    val measuredInset = with(density) { bottomBarHeightPx.toDp() }
+    val fallbackInset = profilesEditorBottomInset(shortWindow, density.fontScale)
+    val actionSpace = if (bottomBarHeightPx > 0) measuredInset else fallbackInset
     val section by model.profileSection.collectAsStateWithLifecycle()
+    val savedProfileId by model.savedProfileId.collectAsStateWithLifecycle()
+    val canSaveNewCopy = canAddSavedProfile(prefs.profiles)
     val profileScroll = rememberScrollState()
     val sectionLabels = listOf(tr("Buttons", "Botões"), tr("Sticks", "Analógicos"), tr("Triggers", "Gatilhos"), tr("Macros", "Macros"), tr("Turbo", "Turbo"), tr("Vibration", "Vibração"))
     DisposableEffect(Unit) { onDispose { model.cancelX10VibrationPreview() } }
@@ -74,7 +83,7 @@ import kotlinx.coroutines.withContext
     var keyPicker by remember { mutableStateOf<PadKey?>(null) }
     var applySnapshot by remember { mutableStateOf<ControllerConfig?>(null) }
     var readDialog by remember { mutableStateOf(false) }
-    var loadDialog by remember { mutableStateOf<ControllerConfig?>(null) }
+    var loadDialog by remember { mutableStateOf<SavedProfile?>(null) }
     var deleteDialog by remember { mutableStateOf<String?>(null) }
     var exportSnapshot by remember { mutableStateOf<ControllerConfig?>(null) }
     val validationIssues = remember(draft) { draft.profileValidationIssues() }
@@ -103,19 +112,22 @@ import kotlinx.coroutines.withContext
     Box(Modifier.fillMaxSize()) {
     ScreenColumn(Modifier.padding(bottom = actionSpace), scrollState = profileScroll) {
         ScreenHeading(tr("Your setup", "Seus ajustes"), tr("Make it yours.", "Do seu jeito."))
-        if (prefs.profiles.isNotEmpty()) {
-            SectionTitle(tr("Saved profiles", "Perfis salvos") + " · ${prefs.profiles.size}",
-                if (savedVisible) tr("Hide", "Ocultar") else tr("Open", "Abrir")) { savedVisible = !savedVisible }
-            if (savedVisible) {
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionTitle(tr("Saved profiles", "Perfis salvos") + " · ${prefs.profiles.size}/30",
+            if (savedVisible) tr("Hide", "Ocultar") else tr("Open", "Abrir")) { savedVisible = !savedVisible }
+        if (savedVisible) {
+            if (prefs.profiles.isEmpty()) Description(tr("No saved copies yet. Save your draft to keep it on this phone.", "Nenhuma cópia salva ainda. Salve seu rascunho para guardá-lo neste celular."))
+            else Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 prefs.profiles.forEach { profile ->
-                    Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface) {
+                    val selected = profile.id == savedProfileId
+                    Surface(shape = RoundedCornerShape(18.dp), color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant)) {
                         Column(Modifier.width(176.dp).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             HubIcon(Glyph.PROFILES, color = MaterialTheme.colorScheme.secondary)
-                            Text(profile.config.name, style = MaterialTheme.typography.titleMedium, maxLines = 2)
-                            Description(tr("Saved on this phone", "Salvo neste celular"))
+                            Text(profile.config.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(if (selected) tr("Editing this copy", "Editando esta cópia") else tr("Saved on this phone", "Salvo neste celular"),
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Row {
-                                TextButton(onClick = { loadDialog = profile.config }, modifier = Modifier.weight(1f)) { Text(tr("Load", "Carregar")) }
+                                TextButton(onClick = { loadDialog = profile }, modifier = Modifier.weight(1f)) { Text(tr("Load", "Carregar")) }
                                 val deleteLabel = tr("Delete profile", "Excluir perfil")
                                 IconButton(onClick = { deleteDialog = profile.id }, modifier = Modifier.semantics { contentDescription = deleteLabel }) {
                                     HubIcon(Glyph.TRASH, Modifier.size(18.dp))
@@ -125,7 +137,6 @@ import kotlinx.coroutines.withContext
                     }
                 }
             }
-        }
         }
         HubCard(Modifier.fillMaxWidth()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -266,18 +277,21 @@ import kotlinx.coroutines.withContext
             Description(tr("Last settings read-back match: ", "Última conferência dos ajustes por releitura: ") + timeLabel(it))
         }
     }
-    ScreenBottomActions(
+    ProfileEditorBottomBar(
         if (!draftValid) profileSaveBlockedReason(validationIssues)
             ?: tr("Edits reach your controller when you apply.", "Os ajustes só mudam no controle ao aplicar.")
         else tr("Edits reach your controller when you apply.", "Os ajustes só mudam no controle ao aplicar."),
         showHint = !shortWindow || !draftValid,
-        tr("Save profile", "Salvar perfil"),
-        tr("Apply to X10", "Aplicar ao X10"),
-        onSecondary = model::save,
-        onPrimary = { applySnapshot = draft },
-        secondaryEnabled = editorUi.canSaveProfile,
-        primaryEnabled = editorUi.canApplyOrReadFromDevice,
+        editingSavedCopy = savedProfileId != null,
+        canSave = editorUi.canSaveProfile,
+        canApply = editorUi.canApplyToDevice,
+        canSaveNewCopy = canSaveNewCopy,
+        onUpdateSaved = model::updateSavedCopy,
+        onSaveAsNew = model::saveAsNewCopy,
+        onSaveNew = model::saveAsNewCopy,
+        onApply = { applySnapshot = draft },
         modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding(),
+        onMeasuredHeightPx = { bottomBarHeightPx = it },
     )
     }
     keyPicker?.let { source -> KeyPicker(tr("Output for ", "Função para ") + source.label, PadKey.outputs, onDismiss = { keyPicker = null },
@@ -293,7 +307,11 @@ import kotlinx.coroutines.withContext
         X10ApplyDialog(snapshot, editorUi.configurationReady,
             dismiss = { applySnapshot = null }, apply = { applySnapshot = null; model.apply(snapshot) })
     }
-    loadDialog?.let { config -> ConfirmDialog(tr("Load profile?", "Carregar perfil?"), tr("This replaces the profile you are editing. Save first if you want to keep your changes.", "Isso substitui o perfil em edição. Salve antes se quiser guardar suas alterações."), tr("Load", "Carregar"), { loadDialog = null }) { model.load(config); loadDialog = null } }
+    loadDialog?.let { saved ->
+        ConfirmDialog(tr("Load profile?", "Carregar perfil?"), tr("This replaces the profile you are editing. Save first if you want to keep your changes.", "Isso substitui o perfil em edição. Salve antes se quiser guardar suas alterações."), tr("Load", "Carregar"), { loadDialog = null }) {
+            model.loadSaved(saved); loadDialog = null
+        }
+    }
     deleteDialog?.let { id -> ConfirmDialog(tr("Delete saved profile?", "Excluir perfil salvo?"), tr("The saved copy will be removed from this phone.", "A cópia salva será removida deste celular."), tr("Delete", "Excluir"), { deleteDialog = null }) { model.delete(id); deleteDialog = null } }
 }
 

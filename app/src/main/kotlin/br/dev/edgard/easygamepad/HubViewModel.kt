@@ -51,6 +51,9 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     private fun inputPads() = app.input.state.map { it.pads }.distinctUntilChanged()
     private val mutableDraft = MutableStateFlow(ControllerConfig())
     val draft = mutableDraft.asStateFlow()
+    private val mutableSavedProfileId = MutableStateFlow<String?>(null)
+    /** When set, the draft was loaded from this on-phone profile and can be updated in place. */
+    val savedProfileId = mutableSavedProfileId.asStateFlow()
     val tab = MutableStateFlow(0)
     val profileSection = MutableStateFlow(0)
     val connectionSheet = MutableStateFlow(false)
@@ -195,7 +198,17 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
             ble.link.value.phase == LinkPhase.READY && ble.link.value.protocol == ConfigurationProtocol.KEYLINKER
     } == true
     fun edit(update: (ControllerConfig) -> ControllerConfig) { mutableDraft.update(update) }
-    fun load(config: ControllerConfig) { mutableDraft.value = config; tab.value = 1 }
+    fun load(config: ControllerConfig) {
+        mutableDraft.value = config
+        mutableSavedProfileId.value = null
+        tab.value = 1
+    }
+    fun loadSaved(profile: SavedProfile) {
+        mutableDraft.value = profile.config
+        mutableSavedProfileId.value = profile.id
+        tab.value = 1
+    }
+    fun clearSavedProfileLink() { mutableSavedProfileId.value = null }
     fun language(tag: String) { viewModelScope.launch {
         app.store.language(tag)
         if (Build.VERSION.SDK_INT >= 33) app.getSystemService(LocaleManager::class.java).applicationLocales =
@@ -312,12 +325,37 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
         stopActiveVibrationPreview()
         if (configurationTarget()) viewModelScope.launch { repository.apply(snapshot) }
     }
-    fun save() { viewModelScope.launch { runCatching { app.store.save(SavedProfile(UUID.randomUUID().toString(), draft.value)) }
-        .onSuccess { repository.notice("Profile saved on this phone", "Perfil salvo neste celular") }
-        .onFailure { repository.notice("Check the profile name and values (up to 30 saved profiles).", "Confira o nome e os valores do perfil (até 30 perfis salvos).", true) } } }
-    fun delete(id: String) { viewModelScope.launch { app.store.delete(id) } }
+    fun save() = saveAsNewCopy()
+    fun updateSavedCopy() {
+        val id = savedProfileId.value ?: return
+        viewModelScope.launch { runCatching { app.store.save(SavedProfile(id, draft.value)) }
+            .onSuccess { repository.notice("Saved profile updated", "Perfil salvo atualizado") }
+            .onFailure { repository.notice("Check the profile name and values.", "Confira o nome e os valores do perfil.", true) } }
+    }
+    fun saveAsNewCopy() {
+        if (!canAddSavedProfile(preferences.value.profiles) && savedProfileId.value == null) {
+            repository.notice("You can keep up to 30 saved profiles. Delete one or update an existing copy.", "É possível guardar até 30 perfis. Exclua um ou atualize uma cópia existente.", true)
+            return
+        }
+        val id = UUID.randomUUID().toString()
+        viewModelScope.launch { runCatching { app.store.save(SavedProfile(id, draft.value)) }
+            .onSuccess {
+                mutableSavedProfileId.value = id
+                repository.notice("Profile saved on this phone", "Perfil salvo neste celular")
+            }
+            .onFailure { repository.notice("Check the profile name and values (up to 30 saved profiles).", "Confira o nome e os valores do perfil (até 30 perfis salvos).", true) } }
+    }
+    fun delete(id: String) {
+        viewModelScope.launch {
+            app.store.delete(id)
+            if (savedProfileId.value == id) mutableSavedProfileId.value = null
+        }
+    }
     fun importProfile(json: String) { runCatching { ProfileStore.import(json) }.onSuccess {
-        load(it); repository.notice("Profile imported. Save it or apply it to your controller when ready.", "Perfil importado. Salve ou aplique ao controle quando quiser.")
+        mutableDraft.value = it
+        mutableSavedProfileId.value = null
+        tab.value = 1
+        repository.notice("Profile imported. Save it or apply it to your controller when ready.", "Perfil importado. Salve ou aplique ao controle quando quiser.")
     }.onFailure { repository.notice("Invalid or incompatible profile file", "Arquivo de perfil inválido ou incompatível", true) } }
     fun startCalibration(kind: CalibrationKind) { if (configurationTarget()) viewModelScope.launch { repository.startCalibration(kind) } }
     fun stopCalibration() { viewModelScope.launch { repository.stopCalibration() } }

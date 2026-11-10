@@ -128,9 +128,8 @@ class ProfileStore(context: Context) {
         }
     }
     suspend fun save(profile: SavedProfile) { profile.config.validate(); store.edit {
-        val current = decodeProfiles(it[stringPreferencesKey("profiles")] ?: "[]").filterNot { p -> p.id == profile.id }
-        require(current.size < 30)
-        it[stringPreferencesKey("profiles")] = encodeProfiles(current + profile)
+        val merged = mergeSavedProfile(decodeProfiles(it[stringPreferencesKey("profiles")] ?: "[]"), profile)
+        it[stringPreferencesKey("profiles")] = encodeProfiles(merged)
     } }
     suspend fun delete(id: String) { store.edit {
         it[stringPreferencesKey("profiles")] = encodeProfiles(decodeProfiles(it[stringPreferencesKey("profiles")] ?: "[]").filterNot { p -> p.id == id })
