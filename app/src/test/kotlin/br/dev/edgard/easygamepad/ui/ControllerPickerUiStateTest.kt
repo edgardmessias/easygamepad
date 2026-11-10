@@ -31,5 +31,16 @@ class ControllerPickerUiStateTest {
         ControllerPickerActions.noop.onAddController(br.dev.edgard.easygamepad.protocol.DeviceProfile.X10, false)
         ControllerPickerActions.noop.onRenameDevice(ScreenUiFixtures.savedX10Disconnected, "Test")
         ControllerPickerActions.noop.onLinkGameplay(1)
+        ControllerPickerActions.noop.onOpenConnection()
+    }
+
+    @Test fun configurationSituationUsesSelectedDevice() {
+        val device = ScreenUiFixtures.savedX10Disconnected
+        val ready = ScreenUiFixtures.pickerSavedX10Disconnected().copy(
+            linkPhase = LinkPhase.READY,
+            linkAddress = device.address,
+            connection = br.dev.edgard.easygamepad.data.ControllerConnectionContext(linkPhase = LinkPhase.READY, linkAddress = device.address),
+        )
+        assertEquals(br.dev.edgard.easygamepad.data.ConfigurationLinkSituation.READY, ready.configurationSituation)
     }
 }

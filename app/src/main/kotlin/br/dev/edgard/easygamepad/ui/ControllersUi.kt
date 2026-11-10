@@ -13,11 +13,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import br.dev.edgard.easygamepad.data.ControllerDevice
+import br.dev.edgard.easygamepad.data.SavedDeviceLinkLabel
 import br.dev.edgard.easygamepad.data.ControllerArtworkCatalog
 import br.dev.edgard.easygamepad.data.controllerName
 import br.dev.edgard.easygamepad.protocol.DeviceProfile
 
-@Composable fun ControllerChoiceCard(device: ControllerDevice, selected: Boolean, ready: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+@Composable fun ControllerChoiceCard(
+    device: ControllerDevice,
+    selected: Boolean,
+    linkLabel: SavedDeviceLinkLabel = SavedDeviceLinkLabel.SAVED_ONLY,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
     Surface(onClick = onClick, enabled = enabled, shape = RoundedCornerShape(20.dp), color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant), modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(17.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -28,12 +35,18 @@ import br.dev.edgard.easygamepad.protocol.DeviceProfile
                 Text(device.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text((device.productName?.takeIf { it != device.name }?.let { "$it · " } ?: "") + device.shortId,
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(when {
-                    ready && device.inputId != null -> tr("Ready to play and customize", "Pronto para jogar e personalizar")
-                    ready -> tr("Connected for customization", "Conectado para personalizar")
-                    device.inputId != null -> tr("Gameplay connected", "Conectado para jogar")
-                    else -> tr("Saved controller", "Controle salvo")
-                }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    when (linkLabel) {
+                        SavedDeviceLinkLabel.APP_READY -> if (device.inputId != null) tr("App and gameplay ready", "App e jogo prontos")
+                        else tr("App configuration connected", "Configuração do app conectada")
+                        SavedDeviceLinkLabel.APP_CONNECTING -> tr("Connecting to app…", "Conectando ao app…")
+                        SavedDeviceLinkLabel.APP_OFFLINE -> tr("Saved · app not connected", "Salvo · app desconectado")
+                        SavedDeviceLinkLabel.GAMEPLAY_LINKED -> tr("Gameplay input linked", "Entrada de jogo vinculada")
+                        SavedDeviceLinkLabel.SAVED_ONLY -> tr("Saved on phone · not nearby", "Salvo no celular · não está por perto")
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             if (selected) HubIcon(Glyph.CHECK, Modifier.size(19.dp), MaterialTheme.colorScheme.primary)
         }

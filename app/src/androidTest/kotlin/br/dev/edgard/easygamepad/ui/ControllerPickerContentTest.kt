@@ -46,4 +46,27 @@ class ControllerPickerContentTest {
         }
         composeRule.onNodeWithText("Finish the current operation", substring = true).assertIsDisplayed()
     }
+
+    @Test fun selectedShowsSeparateGameplayAndAppLines() {
+        val device = ControllerDevice("ble:1", "Living room", DeviceProfile.X10.id, "aa:bb:cc:11:22:33", inputId = 2)
+        composeRule.setContent {
+            ProvideWindowLayout {
+                HubTheme("light", "en") {
+                    ControllerPickerContent(
+                        ControllerPickerUiState(
+                            listOf(device),
+                            device,
+                            LinkPhase.DISCONNECTED,
+                            null,
+                            canSwitch = true,
+                            gameplayPads = emptyList(),
+                        ),
+                        ControllerPickerActions.noop,
+                    )
+                }
+            }
+        }
+        composeRule.onNodeWithText("Gameplay: linked", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("App configuration: saved but offline", substring = true).assertIsDisplayed()
+    }
 }

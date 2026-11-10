@@ -64,7 +64,8 @@ class BleClient(private val context: Context, private val scope: CoroutineScope)
         else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
     fun hasPermissions() = permissions().all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
     fun supported() = adapter != null
-    fun enabled() = hasPermissions() && adapter?.isEnabled == true
+    fun radioEnabled() = adapter?.isEnabled == true
+    fun enabled() = hasPermissions() && radioEnabled()
     fun locationEnabled(): Boolean {
         if (Build.VERSION.SDK_INT >= 31) return true
         val manager = context.getSystemService(LocationManager::class.java)
