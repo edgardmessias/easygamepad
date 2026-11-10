@@ -116,10 +116,26 @@ class ControllerRepository internal constructor(
     fun stopX10VibrationPreviewAsync() {
         scope.launch { stopX10VibrationPreview() }
     }
-    private suspend fun <T> runOperation(showSuccess: Boolean = true, block: suspend () -> T): T? = exclusive.withLock {
+    private suspend fun <T> runOperation(showSuccess: Boolean = true, block: suspend () -> T): T? =
+        runBoundOperation(showSuccess, binding = null, stillBound = { true }, block)
+
+    private suspend fun <T> runBoundOperation(
+        showSuccess: Boolean,
+        binding: OperationBinding?,
+        stillBound: (OperationBinding) -> Boolean,
+        block: suspend () -> T,
+    ): T? = exclusive.withLock {
+        if (binding != null && !stillBound(binding)) {
+            log("OP", "Skipped stale binding before start for ${binding.linkAddress}")
+            return@withLock null
+        }
         mutableState.update { it.copy(busy = true, progress = 0f) }
         try {
             val result = block()
+            if (binding != null && !stillBound(binding)) {
+                log("OP", "Dropped late result for ${binding.linkAddress}")
+                return@withLock null
+            }
             if (showSuccess) notice("Confirmed by controller", "Confirmado pelo controle")
             result
         } catch (timeout: TimeoutCancellationException) {
@@ -146,14 +162,19 @@ class ControllerRepository internal constructor(
         connected().request(80, bytes(1)) { raw -> pages.accept(raw).also { result = it } != null }
         requireNotNull(result)
     }
-    suspend fun readSettings(): ControllerSettings? = runOperation(false) {
+    suspend fun readSettings(
+        binding: OperationBinding? = null,
+        stillBound: (OperationBinding) -> Boolean = { true },
+    ): ControllerSettings? = runBoundOperation(false, binding, stillBound) {
         check(!state.value.calibration.stopRequired)
         val active = connected()
-        val result = X10ProfileClient(active).readSettings { progress -> mutableState.update { it.copy(progress = progress) } }
-        mutableState.update { it.copy(progress = 1f, settingsReadAt = System.currentTimeMillis()) }
-        notice("Read from X10: buttons, sticks, triggers, vibration and turbo. Macro sequences kept from your draft.",
-            "Lido do X10: botões, analógicos, gatilhos, vibração e turbo. Sequências de macro mantidas do rascunho.")
-        result
+        X10ProfileClient(active).readSettings { progress -> mutableState.update { it.copy(progress = progress) } }
+    }?.also {
+        mutableState.update { s -> s.copy(progress = 1f, settingsReadAt = System.currentTimeMillis()) }
+        notice(
+            "Read from X10: buttons, sticks, triggers, vibration and turbo. Macro sequences kept from your draft.",
+            "Lido do X10: botões, analógicos, gatilhos, vibração e turbo. Sequências de macro mantidas do rascunho.",
+        )
     }
     suspend fun readVersions() = runOperation {
         check(!state.value.calibration.stopRequired)
@@ -182,14 +203,20 @@ class ControllerRepository internal constructor(
                 "O teste de vibração não foi concluído. Se continuar vibrando, desligue o controle antes de reconectar.", true)
         }
     }
-    suspend fun apply(config: ControllerConfig): Boolean = runOperation(false) {
-        check(!state.value.calibration.stopRequired)
-        config.validate()
-        val active = connected()
-        mutableState.update { it.copy(appliedAt = null, applyResult = null, lastAppliedSnapshot = config) }
-        val result = X10ProfileClient(active).apply(config, uploadMode = { macroMode = it }, progress = { progress ->
-            mutableState.update { it.copy(progress = progress) }
-        })
+    suspend fun apply(
+        config: ControllerConfig,
+        binding: OperationBinding? = null,
+        stillBound: (OperationBinding) -> Boolean = { true },
+    ): Boolean {
+        mutableState.update { it.copy(appliedAt = null, applyResult = null, lastAppliedSnapshot = config, progress = 0f) }
+        val result = runBoundOperation(false, binding, stillBound) {
+            check(!state.value.calibration.stopRequired)
+            config.validate()
+            val active = connected()
+            X10ProfileClient(active).apply(config, uploadMode = { macroMode = it }, progress = { progress ->
+                mutableState.update { it.copy(progress = progress) }
+            })
+        } ?: return false
         val now = System.currentTimeMillis()
         mutableState.update { it.copy(applyResult = result, progress = 1f,
             appliedAt = now.takeIf { result is X10ApplyResult.Matched },
@@ -200,8 +227,8 @@ class ControllerRepository internal constructor(
             is X10ApplyResult.Unconfirmed -> "X10 settings unconfirmed: ${result.reason}"
         })
         x10ApplyNotice(result).let { notice(it.english, it.portuguese, it.error) }
-        result is X10ApplyResult.Matched
-    } ?: false
+        return result is X10ApplyResult.Matched
+    }
 
     suspend fun startCalibration(kind: CalibrationKind) = runOperation(false) {
         check(!state.value.calibration.stopRequired)

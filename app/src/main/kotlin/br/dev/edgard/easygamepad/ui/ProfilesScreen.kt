@@ -38,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
+import br.dev.edgard.easygamepad.data.EditorSaveBinding
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import br.dev.edgard.easygamepad.HubViewModel
 import br.dev.edgard.easygamepad.data.ControllerArtworkCatalog
@@ -101,13 +102,15 @@ import kotlinx.coroutines.withContext
     }
     val import = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
+            val origin: EditorSaveBinding = model.captureEditorBinding()
             runCatching { withContext(Dispatchers.IO) {
                 requireNotNull(context.contentResolver.openInputStream(uri)).bufferedReader().use { reader ->
                     val buffer = CharArray(100001); var count = 0
                     while (count < buffer.size) { val read = reader.read(buffer, count, buffer.size - count); if (read < 0) break; count += read }
                     require(count <= 100000); String(buffer, 0, count)
                 }
-            } }.onSuccess(model::importProfile).onFailure { model.repository.notice("Could not read this profile file", "Não foi possível ler este arquivo de perfil", true) }
+            } }.onSuccess { json -> model.importProfile(json, origin) }
+                .onFailure { model.repository.notice("Could not read this profile file", "Não foi possível ler este arquivo de perfil", true) }
         }
     }
     Box(Modifier.fillMaxSize()) {

@@ -49,6 +49,33 @@ class ControllerDrafts(private val maxEntries: Int = WORKSPACE_DRAFT_LIMIT) {
         put(id, ControllerDraftSnapshot(config, baseline, linkedSavedProfileId))
     }
 
+    fun adoptSavedBaseline(id: String, savedConfig: ControllerConfig, profileId: String) {
+        val live = workspaces[id]?.config ?: savedConfig
+        put(id, ControllerDraftSnapshot(live, savedConfig, profileId))
+    }
+
+    fun clearSavedProfileLinkEverywhere(profileId: String) {
+        workspaces.keys.toList().forEach { key ->
+            workspaces[key]?.takeIf { it.linkedSavedProfileId == profileId }?.let {
+                put(key, it.copy(linkedSavedProfileId = null))
+            }
+        }
+    }
+
+    /** Applies a successful save to a workspace without disturbing a newer live draft. */
+    fun completeSave(workspaceKey: String, savedConfig: ControllerConfig, profileId: String, liveConfig: ControllerConfig?) {
+        val current = workspaces[workspaceKey]?.config ?: liveConfig ?: savedConfig
+        val live = liveConfig ?: current
+        put(
+            workspaceKey,
+            ControllerDraftSnapshot(
+                config = live,
+                baseline = savedConfig,
+                linkedSavedProfileId = profileId,
+            ),
+        )
+    }
+
     fun adoptBaseline(id: String?, config: ControllerConfig, linkedSavedProfileId: String? = null) {
         if (id == null) return
         put(id, ControllerDraftSnapshot(config, config, linkedSavedProfileId))
