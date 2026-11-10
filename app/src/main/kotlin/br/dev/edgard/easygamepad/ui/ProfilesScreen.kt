@@ -67,6 +67,8 @@ import kotlinx.coroutines.withContext
     var loadDialog by remember { mutableStateOf<ControllerConfig?>(null) }
     var deleteDialog by remember { mutableStateOf<String?>(null) }
     var exportSnapshot by remember { mutableStateOf<ControllerConfig?>(null) }
+    val draftValid = remember(draft) { runCatching { draft.validate() }.isSuccess }
+    val editorUi = profilesEditorUiState(link.phase, hardware.busy, hardware.calibration, draftValid)
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         val snapshot = exportSnapshot
         if (uri != null && snapshot != null) scope.launch {
@@ -125,7 +127,7 @@ import kotlinx.coroutines.withContext
                     Text(tr("Editing", "Em edição"), Modifier.padding(horizontal = 10.dp, vertical = 6.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
                 }
                 val readLabel = tr("Get settings from X10", "Trazer ajustes do X10")
-                IconButton(onClick = { readDialog = true }, enabled = link.phase == LinkPhase.READY && !hardware.busy && !hardware.calibration.stopRequired,
+                IconButton(onClick = { readDialog = true }, enabled = editorUi.canApplyOrReadFromDevice,
                     modifier = Modifier.semantics { contentDescription = readLabel }) {
                     HubIcon(Glyph.DOWNLOAD, color = MaterialTheme.colorScheme.primary)
                 }
@@ -233,7 +235,7 @@ import kotlinx.coroutines.withContext
         }
         if (hardware.busy) LinearProgressIndicator(progress = { hardware.progress }, modifier = Modifier.fillMaxWidth())
         if (link.phase != LinkPhase.READY) TextButton(onClick = model::connectSelected, modifier = Modifier.fillMaxWidth()) { Text(tr("Connect your controller to apply", "Conecte o controle para aplicar")) }
-        OutlinedButton(onClick = { exportSnapshot = draft; export.launch("easygamepad-profile.json") }, enabled = runCatching { draft.validate() }.isSuccess, modifier = Modifier.fillMaxWidth()) { Text(tr("Export profile", "Exportar perfil")) }
+        OutlinedButton(onClick = { exportSnapshot = draft; export.launch("easygamepad-profile.json") }, enabled = editorUi.canSaveProfile, modifier = Modifier.fillMaxWidth()) { Text(tr("Export profile", "Exportar perfil")) }
         TextButton(onClick = { import.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }, modifier = Modifier.fillMaxWidth()) { Text(tr("Import profile from a file", "Importar perfil de um arquivo")) }
         hardware.applyResult?.let { result ->
             val feedback = x10ApplyNotice(result)
@@ -248,9 +250,9 @@ import kotlinx.coroutines.withContext
             if (!shortWindow) Text(tr("Edits reach your controller when you apply.", "Os ajustes só mudam no controle ao aplicar."),
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = model::save, enabled = runCatching { draft.validate() }.isSuccess,
+                OutlinedButton(onClick = model::save, enabled = editorUi.canSaveProfile,
                     modifier = Modifier.weight(1f)) { Text(tr("Save profile", "Salvar perfil")) }
-                Button(onClick = { applySnapshot = draft }, enabled = link.phase == LinkPhase.READY && !hardware.busy && !hardware.calibration.stopRequired && runCatching { draft.validate() }.isSuccess,
+                Button(onClick = { applySnapshot = draft }, enabled = editorUi.canApplyOrReadFromDevice,
                     modifier = Modifier.weight(1f)) { Text(tr("Apply to X10", "Aplicar ao X10")) }
             }
         }
@@ -266,7 +268,7 @@ import kotlinx.coroutines.withContext
             "Substituir o perfil em edição pelos ajustes do seu X10? Salve antes se quiser guardar suas alterações. O nome do perfil e as sequências de macro serão mantidos."),
         tr("Get settings", "Trazer ajustes"), { readDialog = false }) { readDialog = false; model.readController() }
     applySnapshot?.let { snapshot ->
-        X10ApplyDialog(snapshot, link.phase == LinkPhase.READY && !hardware.busy && !hardware.calibration.stopRequired,
+        X10ApplyDialog(snapshot, editorUi.configurationReady,
             dismiss = { applySnapshot = null }, apply = { applySnapshot = null; model.apply(snapshot) })
     }
     loadDialog?.let { config -> ConfirmDialog(tr("Load profile?", "Carregar perfil?"), tr("This replaces the profile you are editing. Save first if you want to keep your changes.", "Isso substitui o perfil em edição. Salve antes se quiser guardar suas alterações."), tr("Load", "Carregar"), { loadDialog = null }) { model.load(config); loadDialog = null } }
