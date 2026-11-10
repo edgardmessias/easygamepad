@@ -33,6 +33,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -41,9 +44,18 @@ import br.dev.edgard.easygamepad.data.ControllerArtwork
 import br.dev.edgard.easygamepad.input.InputState
 
 @Composable fun StatusPill(label: String, active: Boolean, modifier: Modifier = Modifier,
-    color: Color = MaterialTheme.colorScheme.primary) {
+    color: Color = MaterialTheme.colorScheme.primary, portuguese: Boolean = LocalPortuguese.current) {
     val ink by animateColorAsState(if (active) color else MaterialTheme.colorScheme.onSurfaceVariant, motionTween(Motion.MEDIUM), label = "pill")
-    Surface(modifier.animateContentSize(), shape = CircleShape, color = ink.copy(alpha = .09f), border = BorderStroke(1.dp, ink.copy(alpha = .22f))) {
+    val stateLabel = AccessibilitySemantics.statusState(active, portuguese)
+    Surface(
+        modifier.semantics(mergeDescendants = true) {
+            contentDescription = label
+            stateDescription = stateLabel
+        }.animateContentSize(),
+        shape = CircleShape,
+        color = ink.copy(alpha = .09f),
+        border = BorderStroke(1.dp, ink.copy(alpha = .22f)),
+    ) {
         Row(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Box(Modifier.size(5.dp).background(ink, CircleShape))
@@ -69,7 +81,9 @@ import br.dev.edgard.easygamepad.input.InputState
     val reduced = rememberReducedMotion()
     // The stage settles in once, so a newly selected controller arrives rather than pops.
     val entrance = remember { Animatable(if (reduced) 1f else 0f) }
-    LaunchedEffect(Unit) { entrance.animateTo(1f, tween(Motion.LONG)) }
+    LaunchedEffect(reduced) {
+        if (reduced) entrance.snapTo(1f) else entrance.animateTo(1f, tween(Motion.LONG))
+    }
     Box(modifier.clip(RoundedCornerShape(22.dp)), contentAlignment = Alignment.Center) {
         Canvas(Modifier.matchParentSize()) {
             drawRect(Brush.radialGradient(listOf(secondary.copy(alpha = .16f), primary.copy(alpha = .035f), Color.Transparent),
@@ -106,14 +120,21 @@ import br.dev.edgard.easygamepad.input.InputState
                 maxLines = 2, overflow = TextOverflow.Ellipsis, minLines = 2)
         }
     }
-    if (onClick != null) Surface(onClick = onClick, modifier = modifier, shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surface, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), content = body)
+    if (onClick != null) Surface(
+        onClick = onClick,
+        modifier = modifier.heightIn(min = 48.dp).semantics(mergeDescendants = true) { contentDescription = "$label, $value" },
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        content = body,
+    )
     else Surface(modifier = modifier, shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), content = body)
 }
 
 @Composable fun FeatureTile(title: String, detail: String, glyph: Glyph, color: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Surface(onClick = onClick, modifier = modifier, shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface,
+    Surface(onClick = onClick, modifier = modifier.heightIn(min = 48.dp).semantics(mergeDescendants = true) { contentDescription = "$title. $detail" },
+        shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

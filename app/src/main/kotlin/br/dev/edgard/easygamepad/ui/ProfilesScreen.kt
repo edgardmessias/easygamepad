@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.layout.onSizeChanged
@@ -153,8 +154,13 @@ import kotlinx.coroutines.withContext
                     Text(tr("Editing", "Em edição"), Modifier.padding(horizontal = 10.dp, vertical = 6.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
                 }
                 val readLabel = tr("Get settings from X10", "Trazer ajustes do X10")
-                IconButton(onClick = { readDialog = true }, enabled = editorUi.canApplyOrReadFromDevice,
-                    modifier = Modifier.semantics { contentDescription = readLabel }) {
+                val readReason = AccessibilitySemantics.profilesReadDisabledReason(editorUi, LocalPortuguese.current)
+                IconButton(onClick = { readDialog = true }, enabled = editorUi.canReadFromDevice,
+                    modifier = Modifier.semantics {
+                        contentDescription = readLabel
+                        readReason?.let { stateDescription = it }
+                    },
+                ) {
                     HubIcon(Glyph.DOWNLOAD, color = MaterialTheme.colorScheme.primary)
                 }
             }
@@ -367,17 +373,32 @@ import kotlinx.coroutines.withContext
                 Text("$value$suffix", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
             }
         }
+        val portuguese = LocalPortuguese.current
         Slider(
             value.toFloat(),
             onValueChange = { sliderChange(it.toInt().coerceIn(range)) },
             onValueChangeFinished = { onChangeFinished?.invoke() },
             valueRange = range.first.toFloat()..range.last.toFloat(),
-            modifier = Modifier.semantics { contentDescription = label },
+            modifier = Modifier.semantics {
+                contentDescription = AccessibilitySemantics.vibrationSliderLabel(label, value, suffix, previewing, portuguese)
+            },
         )
     }
 }
 @Composable private fun VibrationPreviewDot(active: Boolean) {
     if (!active) return
+    val color = MaterialTheme.colorScheme.primary
+    val label = tr("Vibration preview on", "Pré-visualização de vibração ativa")
+    if (rememberReducedMotion()) {
+        Box(
+            Modifier
+                .padding(end = 8.dp)
+                .size(10.dp)
+                .semantics { contentDescription = label }
+                .background(color, CircleShape),
+        )
+        return
+    }
     val transition = rememberInfiniteTransition(label = "vibration-preview")
     val alpha by transition.animateFloat(
         initialValue = 0.35f,
@@ -389,7 +410,8 @@ import kotlinx.coroutines.withContext
         Modifier
             .padding(end = 8.dp)
             .size(10.dp)
-            .background(MaterialTheme.colorScheme.primary.copy(alpha = alpha), CircleShape),
+            .semantics { contentDescription = label }
+            .background(color.copy(alpha = alpha), CircleShape),
     )
 }
 

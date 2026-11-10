@@ -37,4 +37,10 @@ class ProfilesEditorUiStateTest {
         assertTrue(state.configurationReady)
         assertTrue(state.canApplyOrReadFromDevice)
     }
+
+    @Test fun disabledApplyReasonsStayStableAcrossLocales() {
+        val busy = ScreenUiFixtures.profilesBusyOnReady()
+        assertTrue(AccessibilitySemantics.profilesApplyDisabledReason(busy, true)!!.contains("operação"))
+        assertTrue(AccessibilitySemantics.profilesApplyDisabledReason(busy, false)!!.contains("operation"))
+    }
 }
