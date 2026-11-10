@@ -116,6 +116,7 @@ narrow screen. Scroll vertically to see both sticks or triggers and file actions
 | --- | --- |
 | Edit controls | Changes the current draft |
 | Save profile | Adds a saved copy on this phone, up to 30 profiles |
+| Update saved | Overwrites the saved copy you loaded, after confirmation |
 | Load a saved profile | Replaces the draft after confirmation |
 | Apply to X10 | Sends the draft to the connected X10 after confirmation |
 | Export profile | Writes the draft to a JSON file you choose |
@@ -127,7 +128,7 @@ controller during the app session; save or export work you want to keep.
 
 ### Read the current X10 settings
 
-Tap **Get settings from X10**, beside the draft name, and confirm **Get settings**.
+Tap **Read from X10**, beside the draft name, and confirm **Read from X10**.
 Save your draft first if you want to keep its existing values.
 
 The read replaces **mappings, stick ranges and axis inversion, trigger ranges,
@@ -139,8 +140,8 @@ not a complete backup of every onboard setting.
 
 Tap a button in the illustration to choose its output. Switch to **Back** for M1
 and M2, or scroll to **Show button list** for a list editor. **Restore standard
-output** restores a regular button in the draft; **Remove assignment** removes a
-rear-button mapping from the draft. **Restore default button functions** restores
+output** restores a regular button in the draft; **Do not send assignment** removes a
+rear-button mapping from the draft so it is omitted from the next apply. **Restore default button functions** restores
 the standard outputs in the draft.
 
 <img src="images/buttons.png" width="300" alt="Button editor with the X10 illustration and the Save profile and Apply to X10 action bar">
@@ -225,9 +226,10 @@ There is no automatic rollback.
 
 A controller acknowledgment confirms a command response, not persistence after
 power-off. Verify the behavior in **Test**, read back supported settings, and
-check again after restarting the controller when persistence matters. Removing
-a macro, turbo entry or rear assignment locally is not a guarantee that a
-previous onboard rule has been erased.
+check again after restarting the controller when persistence matters. Omitted
+mappings, macros or turbo entries are not sent as erase commands; onboard rules
+may remain until you replace them explicitly. See
+[X10 read-back validation](x10-readback-validation.md) for what apply compares after upload.
 
 The write and calibration paths are implemented, but complete physical validation
 of every setting, removal behavior and persistence remains outstanding.

@@ -16,10 +16,10 @@ flowchart TD
     UI[Compose screens] --> VM[HubViewModel]
     VM --> STORE[ProfileStore / DataStore]
     VM --> INPUT[GamepadInput / InputSessions]
-    VM --> REPO[ControllerRepository]
-    REPO --> SESSION[CommandSession / KRLY codecs]
+    VM -->     REPO[ControllerRepository / KeyLinkerRepository]
+    REPO --> SESSION[CommandSession / protocol codecs]
     SESSION --> BLE[BleClient / GamepadTransport]
-    BLE --> CONFIG[X10 configuration BLE]
+    BLE --> CONFIG[Configuration BLE (KRLY or KeyLinker)]
     HID[Android gamepad events] --> INPUT
 ```
 
@@ -39,10 +39,12 @@ Paths abbreviated as `app/.../` refer to the Kotlin package under
 motion events and notifies the ViewModel of foreground transitions. Compose
 screens collect state flows and request operations through the ViewModel.
 
-`ControllerRepository` currently implements the **KRLY driver**. Its operation
-mutex serializes feature work and exposes busy/progress state. `CommandSession`
-separately serializes requests; `BleClient` serializes GATT writes. Coroutine
-mutexes and suspended waits do not block the UI thread while waiting for replies.
+`ControllerRepository` implements the **KRLY (X10) driver**; `KeyLinkerRepository`
+implements the **KeyLinker (X20 / X20 Pro) driver**. Each acts only on links opened
+for its protocol. The KRLY operation mutex serializes X10 feature work and exposes
+busy/progress state. `CommandSession` and `KeyLinkerSession` separately serialize
+requests; `BleClient` serializes GATT writes. Coroutine mutexes and suspended waits
+do not block the UI thread while waiting for replies.
 
 ## Connections and device identity
 
@@ -84,9 +86,11 @@ reported independently of an already-ready connection.
 
 ### Capabilities and additional controllers
 
-`DeviceProfile.X10` is the current configuration profile. Capabilities govern
-configuration, battery, calibration, firmware information, macros, turbo, ranges,
-vibration, rear buttons and artwork. Unknown models receive input testing only.
+`DeviceProfile` selects the configuration protocol per model: **X10** uses KRLY
+([protocol reference](protocol.md)); **X20** and **X20 Pro** use KeyLinker
+([KeyLinker reference](keylinker.md)). Capabilities govern configuration, battery,
+calibration, firmware information, macros, turbo, ranges, vibration, rear buttons
+and artwork. Unknown models receive input testing only.
 
 To add support:
 
@@ -103,10 +107,13 @@ To add support:
    DataStore keys and user files. Gate UI actions and ViewModel operations alike.
 6. Follow the hardware checklist before claiming support.
 
-**KeyLinker requires its own driver.** Its frame layout, UUIDs, checksum and
+**KeyLinker has a dedicated Android driver.** [`KeyLinkerRepository`](../app/src/main/kotlin/br/dev/edgard/easygamepad/data/KeyLinkerRepository.kt),
+[`KeyLinkerScreen`](../app/src/main/kotlin/br/dev/edgard/easygamepad/ui/KeyLinkerScreen.kt)
+and the `protocol/.../keylinker` codecs implement identification, reads and gated
+writes on links opened for `KEYLINKER`. Its frame layout, UUIDs, checksum and
 scrambling differ from KRLY. Artwork reused from x20ctl is documented in
-[third-party credits](../THIRD_PARTY.md); it does not supply a KeyLinker backend
-for EasyGamepad or prove support for another controller.
+[third-party credits](../THIRD_PARTY.md); upstream x20ctl does not by itself prove
+support for unrelated controllers or firmware.
 
 ## Drafts, saved data and profiles
 

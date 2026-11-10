@@ -97,7 +97,7 @@ Example, identity request with serial 1 and nonce 0, as sent:
 | `0xB5` | Macro | `[position, slot]` | Read | Proven identities only |
 | `0xB6` | Remap | `[position]` | Read | Proven identities only |
 | `0xB7` | Lighting | `[position]` | Read | Only if exposed |
-| `0x31`–`0x37` | Writes | record | Write | **Never** (preview only) |
+| `0x31`–`0x37` | Writes | record | Write | Yes, when [write gate](#evidence-and-write-gate) allows and the person confirms |
 | `0x16` | Recover (factory reset) | — | Write | **Never** |
 | `0x1D` other payloads | Calibration | — | Write | **Never** |
 
@@ -110,8 +110,8 @@ identification is allowed, reads need an identity that `mayRead`, writes need
 nothing reaches the radio.
 
 A read that times out returns "no usable reply" and the session stays open. A write
-that times out would be indeterminate, so the session would close and the link be
-aborted (unreachable today, because no write is authorized).
+that times out also returns no reply; the session stays open and a follow-up read
+decides Confirmed, Mismatch or Unconfirmed, matching x20ctl's `_send` behavior.
 
 ## Records
 
@@ -163,12 +163,12 @@ no longer drops the link; like x20ctl's `_send`, the read-back decides.
 | --- | --- | --- | --- |
 | Identification | Implemented | Implemented | Recorded replies |
 | Battery gauge | Read | Read | Power query recorded |
-| Stick curves | Read · preview | Read · preview | Round trip recorded |
-| Trigger curves | Read · preview | Read · preview | Round trip recorded |
-| Vibration strength | Read · preview | Read · preview | Round trip recorded |
-| Idle timeout | Read · preview | Read · preview | Round trip recorded |
-| Button remapping | Read · preview | Read · preview | Round trip recorded |
-| Macros | Read · preview | Read · preview | M4 (X20), M1–M6 (X20 Pro) recorded |
+| Stick curves | Read · gated write | Read · gated write | Round trip recorded |
+| Trigger curves | Read · gated write | Read · gated write | Round trip recorded |
+| Vibration strength | Read · gated write | Read · gated write | Round trip recorded |
+| Idle timeout | Read · gated write | Read · gated write | Round trip recorded |
+| Button remapping | Read · gated write | Read · gated write | Round trip recorded |
+| Macros | Read · gated write | Read · gated write | M4 (X20), M1–M6 (X20 Pro) recorded |
 | Turbo | Not exposed | Raw bytes only | Layout not decoded |
 | Lighting | Not exposed | Read colours | First colour only; writes unverified |
 | X20 Pro display image | — | Not available | USB serial in update mode, not BLE |
