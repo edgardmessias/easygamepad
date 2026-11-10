@@ -89,6 +89,9 @@ import java.util.Locale
             val krly = controller?.supportsConfiguration == true
             if (controller != null && ((!krly && !keyLinkerDevice && model.tab.value == 1) || (!krly && model.tab.value == 3))) model.tab.value = 2
         }
+        LaunchedEffect(tab, controller?.supportsConfiguration) {
+            if (tab != 1 || controller?.supportsConfiguration != true) model.cancelX10VibrationPreview()
+        }
         val context = LocalContext.current
         val snackbar = remember { SnackbarHostState() }
         val latestPortuguese by rememberUpdatedState(LocalPortuguese.current)
@@ -232,46 +235,6 @@ import java.util.Locale
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
-}
-
-@Composable fun ScreenColumn(modifier: Modifier = Modifier, scrollState: ScrollState = rememberScrollState(), content: @Composable ColumnScope.() -> Unit) {
-    Box(Modifier.fillMaxSize().then(modifier)) {
-        Column(Modifier.widthIn(max = 720.dp).fillMaxWidth().align(Alignment.TopCenter).verticalScroll(scrollState)
-            .padding(horizontal = 18.dp).padding(top = 12.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp), content = content)
-    }
-}
-
-@Composable fun ScreenHeading(eyebrow: String, title: String, description: String? = null) {
-    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        Eyebrow(eyebrow, color = MaterialTheme.colorScheme.primary)
-        Text(title, style = screenTitleStyle())
-        if (description != null) Description(description)
-    }
-}
-
-@Composable fun ActionCard(icon: Glyph, title: String, body: String, color: androidx.compose.ui.graphics.Color, onClick: () -> Unit) {
-    Surface(onClick = onClick, shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Surface(shape = RoundedCornerShape(14.dp), color = color.copy(alpha = .12f)) { HubIcon(icon, Modifier.padding(13.dp).size(23.dp), color) }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) { Text(title, style = MaterialTheme.typography.titleMedium); Description(body) }
-            HubIcon(Glyph.ARROW, Modifier.size(18.dp), MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-@Composable fun InfoBanner(text: String, error: Boolean = false) {
-    Surface(shape = RoundedCornerShape(18.dp), color = if (error) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer) {
-        Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            HubIcon(Glyph.INFO, Modifier.size(19.dp), if (error) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer)
-            Text(text, style = MaterialTheme.typography.bodyMedium, color = if (error) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer)
-        }
-    }
-}
-
-@Composable fun timeLabel(time: Long): String {
-    val locale = if (LocalPortuguese.current) Locale.forLanguageTag("pt-BR") else Locale.ENGLISH
-    return DateFormat.getTimeInstance(DateFormat.SHORT, locale).format(Date(time))
 }
 
 @Composable private fun ConnectionSheet(model: HubViewModel, scan: () -> Unit, permissionDenied: Boolean) {

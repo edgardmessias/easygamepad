@@ -35,13 +35,10 @@ import java.util.Locale
     val ready = link.phase == LinkPhase.READY
     ScreenColumn {
         ScreenHeading(tr("Controller care", "Cuidados com o controle"), tr("Fine-tune your game.", "Tudo no ponto."), tr("Guided calibration and tools for your X10.", "Calibração guiada e ferramentas para seu X10."))
-        StatusPill(if (ready) tr("App connected", "App conectado") else tr("Connect to calibrate", "Conecte para calibrar"), ready, color = MaterialTheme.colorScheme.tertiary)
+        ScreenLinkStatus(ready, tr("App connected", "App conectado"), tr("Connect to calibrate", "Conecte para calibrar"))
         if (!ready) OutlinedButton(onClick = model::connectSelected, modifier = Modifier.fillMaxWidth()) { Text(tr("Connect to app", "Conectar ao app")) }
         HubCard(Modifier.fillMaxWidth()) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                HubIcon(Glyph.TOOLS, color = MaterialTheme.colorScheme.tertiary)
-                Text(tr("Calibration studio", "Central de calibração"), style = MaterialTheme.typography.titleLarge)
-            }
+            ScreenCardHeader(Glyph.TOOLS, tr("Calibration studio", "Central de calibração"), tint = MaterialTheme.colorScheme.tertiary)
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 CalibrationKind.entries.forEach { kind ->
                     FilterChip(selected == kind, onClick = { selected = kind }, enabled = !cal.stopRequired,

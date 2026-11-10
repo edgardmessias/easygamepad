@@ -66,15 +66,16 @@ import br.dev.edgard.easygamepad.protocol.keylinker.*
         ScreenHeading(tr("KeyLinker settings", "Ajustes KeyLinker"), device?.name ?: "EasySMX X20",
             tr("Read from the controller. Each change is shown before it is sent, then read back to confirm.",
                 "Lidos do controle. Cada alteração é mostrada antes do envio e depois relida para confirmar."))
-        if (!connected) HubCard(Modifier.fillMaxWidth().animateContentSize()) {
-            Text(tr("Connect to read settings", "Conecte para ler os ajustes"), style = MaterialTheme.typography.titleMedium)
-            Description(tr("EasyGamepad opens the configuration channel you chose, asks the controller to identify itself, then reads. It sends nothing to devices you did not choose.",
-                "O EasyGamepad abre o canal de configuração escolhido, pede a identificação do controle e então lê. Nada é enviado a dispositivos que você não escolheu."))
-            AnimatedVisibility(connecting, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-            Button(onClick = model::connectSelected, enabled = !connecting && !switching, modifier = Modifier.fillMaxWidth()) {
-                Text(if (connecting) tr("Connecting…", "Conectando…") else tr("Connect to app", "Conectar ao app"))
-            }
-        }
+        if (!connected) ScreenConnectCard(
+            tr("Connect to read settings", "Conecte para ler os ajustes"),
+            tr("EasyGamepad opens the configuration channel you chose, asks the controller to identify itself, then reads. It sends nothing to devices you did not choose.",
+                "O EasyGamepad abre o canal de configuração escolhido, pede a identificação do controle e então lê. Nada é enviado a dispositivos que você não escolheu."),
+            connecting,
+            !switching,
+            tr("Connect to app", "Conectar ao app"),
+            tr("Connecting…", "Conectando…"),
+            model::connectSelected,
+        )
         if (connected) {
             IdentityCard(state, device?.modelId, model::useIdentifiedModel)
             if (state.mayRead) {

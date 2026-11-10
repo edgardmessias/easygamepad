@@ -346,6 +346,8 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
         vibrationPreviewActivity.value = X10VibrationPreviewActivity()
         vibrationPreviewRequests.trySend(VibrationPreviewRequest.Stop)
     }
+    /** Stops a held X10 motor preview when leaving the profile editor or starting another operation. */
+    fun cancelX10VibrationPreview() = stopActiveVibrationPreview()
     private fun stopActiveVibrationPreview() {
         if (vibrationPreviewActivity.value.active == null) return
         vibrationPreviewActivity.value = X10VibrationPreviewActivity()

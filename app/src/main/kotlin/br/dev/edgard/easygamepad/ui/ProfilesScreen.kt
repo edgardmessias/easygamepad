@@ -19,6 +19,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.*
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
@@ -27,6 +28,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -54,9 +58,14 @@ import kotlinx.coroutines.withContext
     val link by model.link.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val shortWindow = LocalWindowLayout.current.shortHeight
-    val actionSpace = if (LocalDensity.current.fontScale >= 1.3f) 160.dp else if (shortWindow) 64.dp else 84.dp
+    val layout = LocalWindowLayout.current
+    val shortWindow = layout.shortHeight
+    val actionSpace = profilesEditorBottomInset(shortWindow, LocalDensity.current.fontScale)
     val section by model.profileSection.collectAsStateWithLifecycle()
+    val profileScroll = rememberScrollState()
+    val sectionLabels = listOf(tr("Buttons", "Botões"), tr("Sticks", "Analógicos"), tr("Triggers", "Gatilhos"), tr("Macros", "Macros"), tr("Turbo", "Turbo"), tr("Vibration", "Vibração"))
+    DisposableEffect(Unit) { onDispose { model.cancelX10VibrationPreview() } }
+    LaunchedEffect(section) { profileScroll.scrollTo(0) }
     var savedVisible by rememberSaveable { mutableStateOf(false) }
     var editingName by rememberSaveable { mutableStateOf(false) }
     var rear by rememberSaveable { mutableStateOf(false) }
@@ -90,7 +99,7 @@ import kotlinx.coroutines.withContext
         }
     }
     Box(Modifier.fillMaxSize()) {
-    ScreenColumn(Modifier.padding(bottom = actionSpace)) {
+    ScreenColumn(Modifier.padding(bottom = actionSpace), scrollState = profileScroll) {
         ScreenHeading(tr("Your setup", "Seus ajustes"), tr("Make it yours.", "Do seu jeito."))
         if (prefs.profiles.isNotEmpty()) {
             SectionTitle(tr("Saved profiles", "Perfis salvos") + " · ${prefs.profiles.size}",
@@ -135,11 +144,7 @@ import kotlinx.coroutines.withContext
             if (editingName) OutlinedTextField(draft.name, { name -> model.edit { it.copy(name = name.take(40)) } }, modifier = Modifier.fillMaxWidth(), label = { Text(tr("Profile name", "Nome do perfil")) }, singleLine = true, isError = draft.name.isBlank())
             hardware.settingsReadAt?.let { Description(tr("Last read from controller: ", "Última leitura do controle: ") + timeLabel(it)) }
         }
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(tr("Buttons", "Botões"), tr("Sticks", "Analógicos"), tr("Triggers", "Gatilhos"), tr("Macros", "Macros"), tr("Turbo", "Turbo"), tr("Vibration", "Vibração")).forEachIndexed { index, label ->
-                FilterChip(selected = section == index, onClick = { model.profileSection.value = index }, label = { Text(label) })
-            }
-        }
+        ProfileEditorSectionNav(sectionLabels, section, { model.profileSection.value = it })
         when (section) {
             0 -> {
                 HubCard(Modifier.fillMaxWidth()) {
@@ -239,24 +244,28 @@ import kotlinx.coroutines.withContext
         TextButton(onClick = { import.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }, modifier = Modifier.fillMaxWidth()) { Text(tr("Import profile from a file", "Importar perfil de um arquivo")) }
         hardware.applyResult?.let { result ->
             val feedback = x10ApplyNotice(result)
-            Text(tr("Last apply result", "Resultado da última aplicação"), style = MaterialTheme.typography.titleSmall)
-            InfoBanner(tr(feedback.english, feedback.portuguese), feedback.error)
-        }
-        hardware.appliedAt?.let { Description(tr("Last settings read-back match: ", "Última conferência dos ajustes por releitura: ") + timeLabel(it)) }
-    }
-    Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth(), color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp) {
-        Column(Modifier.padding(horizontal = 18.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            // Short landscape windows keep the action bar to one row; the apply dialog still explains this.
-            if (!shortWindow) Text(tr("Edits reach your controller when you apply.", "Os ajustes só mudam no controle ao aplicar."),
-                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = model::save, enabled = editorUi.canSaveProfile,
-                    modifier = Modifier.weight(1f)) { Text(tr("Save profile", "Salvar perfil")) }
-                Button(onClick = { applySnapshot = draft }, enabled = editorUi.canApplyOrReadFromDevice,
-                    modifier = Modifier.weight(1f)) { Text(tr("Apply to X10", "Aplicar ao X10")) }
-            }
+            OperationOutcome(
+                tr("Last apply result", "Resultado da última aplicação"),
+                tr(feedback.english, feedback.portuguese),
+                feedback.error,
+                hardware.appliedAt,
+                tr("Last settings read-back match: ", "Última conferência dos ajustes por releitura: "),
+            )
+        } ?: hardware.appliedAt?.let {
+            Description(tr("Last settings read-back match: ", "Última conferência dos ajustes por releitura: ") + timeLabel(it))
         }
     }
+    ScreenBottomActions(
+        tr("Edits reach your controller when you apply.", "Os ajustes só mudam no controle ao aplicar."),
+        showHint = !shortWindow,
+        tr("Save profile", "Salvar perfil"),
+        tr("Apply to X10", "Aplicar ao X10"),
+        onSecondary = model::save,
+        onPrimary = { applySnapshot = draft },
+        secondaryEnabled = editorUi.canSaveProfile,
+        primaryEnabled = editorUi.canApplyOrReadFromDevice,
+        modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding(),
+    )
     }
     keyPicker?.let { source -> KeyPicker(tr("Output for ", "Função para ") + source.label, PadKey.outputs, onDismiss = { keyPicker = null },
         clearLabel = if (source in PadKey.outputs) tr("Restore standard output", "Restaurar função padrão") else tr("Do not send assignment", "Não enviar atribuição"),
