@@ -5,6 +5,7 @@ java {
     targetCompatibility = JavaVersion.VERSION_17
 }
 dependencies {
+    implementation("org.json:json:20240303")
     implementation(libs.coroutines.core)
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)

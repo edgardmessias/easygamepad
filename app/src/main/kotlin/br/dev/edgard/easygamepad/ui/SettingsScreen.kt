@@ -76,6 +76,18 @@ import br.dev.edgard.easygamepad.protocol.GattProfile
         HubCard(Modifier.fillMaxWidth()) {
             Text(tr("Your data stays yours.", "Seus dados ficam com você."), style = MaterialTheme.typography.titleLarge)
             Description(tr("No account, ads, analytics or internet permission. Profiles are stored locally. Bluetooth logs stay in memory until you choose to share them. Export your profiles before uninstalling the app.", "Sem conta, anúncios, telemetria ou permissão de internet. Os perfis são armazenados localmente. Os registros Bluetooth ficam na memória até você decidir compartilhá-los. Exporte seus perfis antes de desinstalar o app."))
+            if (prefs.storageIoError) {
+                InfoBanner(tr("Local storage could not be read or written. Restart the app or free space on your phone.", "Não foi possível ler ou gravar os dados locais. Reinicie o app ou libere espaço no celular."), error = true)
+            } else if (prefs.storageWarnings.isNotEmpty()) {
+                val skipped = prefs.storageWarnings.sumOf { it.skippedEntries }
+                val unreadable = prefs.storageWarnings.any { it.rootUnreadable }
+                val detail = when {
+                    unreadable && skipped > 0 -> tr("Some saved data could not be read ($skipped entries skipped). Export valid profiles before fixing storage.", "Parte dos dados salvos não pôde ser lida ($skipped entradas ignoradas). Exporte perfis válidos antes de corrigir o armazenamento.")
+                    unreadable -> tr("A saved data block could not be read. Valid entries are still shown; broken bytes were not rewritten.", "Um bloco de dados salvos não pôde ser lido. As entradas válidas continuam visíveis; os bytes corrompidos não foram regravados.")
+                    else -> tr("$skipped saved entries were skipped because they are invalid. The rest is intact.", "$skipped entradas salvas foram ignoradas por estarem inválidas. O restante está intacto.")
+                }
+                InfoBanner(detail, error = true)
+            }
         }
         if (device?.supportsConfiguration == true) HubCard(Modifier.fillMaxWidth()) {
             Row(verticalAlignment = Alignment.CenterVertically) {

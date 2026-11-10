@@ -17,6 +17,11 @@ Separately, **x20ctl** (linked below) is an independent open-source project whos
 assets are reused under its license; it is named here for attribution, not as the
 sole source of the protocol.
 
+## org.json (JVM profile codec tests)
+
+- Maven coordinates: `org.json:json` (used in the `protocol` module for profile import/export codec unit tests and encoding)
+- License: **Public Domain** ([JSON.org terms](https://www.json.org/json-en.html))
+
 ## x20ctl — EasySMX X10 images and geometry
 
 - Project: https://github.com/AmjadAAYD/x20ctl  

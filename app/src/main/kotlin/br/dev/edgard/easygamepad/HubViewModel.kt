@@ -330,7 +330,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
         val id = savedProfileId.value ?: return
         viewModelScope.launch { runCatching { app.store.save(SavedProfile(id, draft.value)) }
             .onSuccess { repository.notice("Saved profile updated", "Perfil salvo atualizado") }
-            .onFailure { repository.notice("Check the profile name and values.", "Confira o nome e os valores do perfil.", true) } }
+            .onFailure { e -> profileSaveFailureNotice(e) } }
     }
     fun saveAsNewCopy() {
         if (!canAddSavedProfile(preferences.value.profiles) && savedProfileId.value == null) {
@@ -343,12 +343,29 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
                 mutableSavedProfileId.value = id
                 repository.notice("Profile saved on this phone", "Perfil salvo neste celular")
             }
-            .onFailure { repository.notice("Check the profile name and values (up to 30 saved profiles).", "Confira o nome e os valores do perfil (até 30 perfis salvos).", true) } }
+            .onFailure { e -> profileSaveFailureNotice(e) } }
     }
     fun delete(id: String) {
         viewModelScope.launch {
-            app.store.delete(id)
-            if (savedProfileId.value == id) mutableSavedProfileId.value = null
+            runCatching { app.store.delete(id) }
+                .onSuccess { if (savedProfileId.value == id) mutableSavedProfileId.value = null }
+                .onFailure { e -> profileSaveFailureNotice(e, delete = true) }
+        }
+    }
+
+    private fun profileSaveFailureNotice(error: Throwable, delete: Boolean = false) {
+        if (error is StoragePersistenceException) {
+            repository.notice(
+                if (delete) "Could not delete the profile. Local storage is unavailable." else "Could not save the profile. Local storage is unavailable.",
+                if (delete) "Não foi possível excluir o perfil. O armazenamento local está indisponível." else "Não foi possível salvar o perfil. O armazenamento local está indisponível.",
+                true,
+            )
+        } else {
+            repository.notice(
+                if (delete) "Could not delete the profile. Try again." else "Check the profile name and values (up to 30 saved profiles).",
+                if (delete) "Não foi possível excluir o perfil. Tente novamente." else "Confira o nome e os valores do perfil (até 30 perfis salvos).",
+                true,
+            )
         }
     }
     fun importProfile(json: String) { runCatching { ProfileStore.import(json) }.onSuccess {
