@@ -16,6 +16,7 @@ import br.dev.edgard.easygamepad.protocol.*
 import br.dev.edgard.easygamepad.protocol.keylinker.KeyLinkerFeature
 import br.dev.edgard.easygamepad.protocol.keylinker.KeyLinkerSerials
 import br.dev.edgard.easygamepad.protocol.keylinker.KeyLinkerWritePlan
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
@@ -61,12 +62,19 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     val vibrationTestAvailability = input.map { it.vibrationAvailability() }.distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, GamepadVibrationAvailability.NO_DEVICE)
     val link = ble.link
+    val canTestX10Vibration = combine(selectedDevice, link, operationGate.canSwitch) { device, connection, idle ->
+        device?.isX10 == true && device.address != null && device.address == connection.address &&
+            connection.phase == LinkPhase.READY && connection.protocol == ConfigurationProtocol.KRLY && idle
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
     private var connectingGatt: GattProfile? = null
     private var connectingModel: String? = null
     private var reconnectJob: Job? = null
     private var disconnectJob: Job? = null
     private var manuallyDisconnected = false
     private var isForeground = false
+    private val vibrationPreviewRequests = Channel<VibrationPreviewRequest>(Channel.CONFLATED)
+    private val vibrationPreviewActivity = MutableStateFlow(X10VibrationPreviewActivity())
+    val x10VibrationPreview = vibrationPreviewActivity.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -108,6 +116,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
                 if (current.isBlank() && language != "auto") manager.applicationLocales = LocaleList.forLanguageTags(language)
             }
         }
+        viewModelScope.launch { runX10VibrationPreviewWorker() }
     }
     fun chooseDevice(device: ControllerDevice) {
         if (device.id == selectedId.value) { deviceSheet.value = false; return }
@@ -299,7 +308,10 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
         }
     } }
     fun readVersions() { if (configurationTarget()) viewModelScope.launch { repository.readVersions() } }
-    fun apply() { if (configurationTarget()) { val snapshot = draft.value; viewModelScope.launch { repository.apply(snapshot) } } }
+    fun apply() {
+        stopActiveVibrationPreview()
+        if (configurationTarget()) { val snapshot = draft.value; viewModelScope.launch { repository.apply(snapshot) } }
+    }
     fun save() { viewModelScope.launch { runCatching { app.store.save(SavedProfile(UUID.randomUUID().toString(), draft.value)) }
         .onSuccess { repository.notice("Profile saved on this phone", "Perfil salvo neste celular") }
         .onFailure { repository.notice("Check the profile name and values (up to 30 saved profiles).", "Confira o nome e os valores do perfil (até 30 perfis salvos).", true) } } }
@@ -311,5 +323,62 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     fun stopCalibration() { viewModelScope.launch { repository.stopCalibration() } }
     fun reset() { if (configurationTarget()) viewModelScope.launch { repository.reset() } }
     fun rumble() { if (!app.input.rumble()) repository.notice("This gamepad does not expose vibration to Android.", "Este controle não disponibiliza vibração para o Android.", true) }
-    companion object { private const val SETUP_ID = "new-x10" }
+    fun setLeftVibration(value: Int) {
+        edit { it.copy(leftVibration = value) }
+        holdX10VibrationPreview(X10Motor.LEFT, value)
+    }
+    fun setRightVibration(value: Int) {
+        edit { it.copy(rightVibration = value) }
+        holdX10VibrationPreview(X10Motor.RIGHT, value)
+    }
+    fun finishLeftVibrationPreview() = finishX10VibrationPreview(X10Motor.LEFT)
+    fun finishRightVibrationPreview() = finishX10VibrationPreview(X10Motor.RIGHT)
+    private fun holdX10VibrationPreview(motor: X10Motor, intensity: Int) {
+        if (!canPreviewX10Vibration()) {
+            vibrationPreviewActivity.value = X10VibrationPreviewActivity()
+            return
+        }
+        vibrationPreviewActivity.value = X10VibrationPreviewActivity(motor)
+        vibrationPreviewRequests.trySend(VibrationPreviewRequest.Hold(motor, intensity))
+    }
+    private fun finishX10VibrationPreview(motor: X10Motor) {
+        if (vibrationPreviewActivity.value.active != motor) return
+        vibrationPreviewActivity.value = X10VibrationPreviewActivity()
+        vibrationPreviewRequests.trySend(VibrationPreviewRequest.Stop)
+    }
+    private fun stopActiveVibrationPreview() {
+        if (vibrationPreviewActivity.value.active == null) return
+        vibrationPreviewActivity.value = X10VibrationPreviewActivity()
+        vibrationPreviewRequests.trySend(VibrationPreviewRequest.Stop)
+    }
+    private suspend fun runX10VibrationPreviewWorker() {
+        var activeMotor: X10Motor? = null
+        for (request in vibrationPreviewRequests) {
+            when (request) {
+                is VibrationPreviewRequest.Hold -> {
+                    if (!canPreviewX10Vibration()) continue
+                    if (activeMotor != null && activeMotor != request.motor) repository.stopX10VibrationPreview()
+                    repository.holdX10VibrationPreview(request.motor, request.intensity)
+                    activeMotor = request.motor
+                }
+                VibrationPreviewRequest.Stop -> {
+                    repository.stopX10VibrationPreview()
+                    activeMotor = null
+                }
+            }
+        }
+    }
+    private fun canPreviewX10Vibration() =
+        selectedDevice.value?.isX10 == true && configurationTarget() && operationGate.canSwitchNow()
+    override fun onCleared() {
+        repository.stopX10VibrationPreviewAsync()
+        super.onCleared()
+    }
+    private sealed interface VibrationPreviewRequest {
+        data class Hold(val motor: X10Motor, val intensity: Int) : VibrationPreviewRequest
+        data object Stop : VibrationPreviewRequest
+    }
+    companion object {
+        private const val SETUP_ID = "new-x10"
+    }
 }

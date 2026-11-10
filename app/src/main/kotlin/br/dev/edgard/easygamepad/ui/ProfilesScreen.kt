@@ -7,11 +7,17 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -43,6 +49,8 @@ import kotlinx.coroutines.withContext
     val prefs by model.preferences.collectAsStateWithLifecycle()
     val hardware by model.hardware.collectAsStateWithLifecycle()
     val vibrationTestAvailability by model.vibrationTestAvailability.collectAsStateWithLifecycle()
+    val canTestX10Vibration by model.canTestX10Vibration.collectAsStateWithLifecycle()
+    val x10VibrationPreview by model.x10VibrationPreview.collectAsStateWithLifecycle()
     val link by model.link.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -197,8 +205,16 @@ import kotlinx.coroutines.withContext
             else -> HubCard(Modifier.fillMaxWidth()) {
                 Text(tr("Feel every moment.", "Sinta cada momento."), style = MaterialTheme.typography.titleLarge)
                 Description(tr("Set the intensity of each controller motor. Availability depends on the controller's operating mode.", "Ajuste a intensidade de cada motor do controle. A disponibilidade depende do modo de operação."))
-                ValueSlider(tr("Left motor", "Motor esquerdo"), draft.leftVibration, 0..100, "%") { value -> model.edit { it.copy(leftVibration = value) } }
-                ValueSlider(tr("Right motor", "Motor direito"), draft.rightVibration, 0..100, "%") { value -> model.edit { it.copy(rightVibration = value) } }
+                ValueSlider(tr("Left motor", "Motor esquerdo"), draft.leftVibration, 0..100, "%",
+                    previewing = x10VibrationPreview.busy(X10Motor.LEFT),
+                    onChange = model::setLeftVibration, onChangeFinished = model::finishLeftVibrationPreview)
+                ValueSlider(tr("Right motor", "Motor direito"), draft.rightVibration, 0..100, "%",
+                    previewing = x10VibrationPreview.busy(X10Motor.RIGHT),
+                    onChange = model::setRightVibration, onChangeFinished = model::finishRightVibrationPreview)
+                Description(tr("While the X10 configuration channel is ready, hold and drag a slider to feel that motor at the chosen intensity. Release the slider to stop. Nothing is saved until you apply the profile. If vibration continues after release, turn the controller off.",
+                    "Com o canal de configuração do X10 pronto, mantenha e arraste um controle para sentir aquele motor na intensidade escolhida. Solte para parar. Nada é gravado até você aplicar o perfil. Se continuar vibrando após soltar, desligue o controle."))
+                if (!canTestX10Vibration) Description(tr("Connect the X10 configuration channel and finish any active operation to preview motor intensity on the controller.",
+                    "Conecte o canal de configuração do X10 e conclua qualquer operação em andamento para pré-visualizar a intensidade dos motores no controle."))
                 OutlinedButton(onClick = model::rumble, enabled = vibrationTestAvailability == GamepadVibrationAvailability.AVAILABLE) {
                     Text(tr("Test Android gamepad vibration", "Testar vibração do controle no Android"))
                 }
@@ -207,8 +223,8 @@ import kotlinx.coroutines.withContext
                         "Connect and select the gameplay controller to test vibration. The app configuration connection alone is not enough.",
                         "Conecte e selecione o controle para jogar antes de testar a vibração. Apenas a conexão de configuração com o app não é suficiente.")
                     GamepadVibrationAvailability.UNSUPPORTED -> tr(
-                        "Android does not expose vibration for this controller in its current connection mode. You can still apply motor intensity settings to the X10.",
-                        "O Android não disponibiliza vibração para este controle no modo de conexão atual. Você ainda pode aplicar os ajustes de intensidade dos motores ao X10.")
+                        "Android does not expose vibration for this controller in its current connection mode. Use the X10 sliders above through its configuration connection.",
+                        "O Android não disponibiliza vibração para este controle no modo de conexão atual. Use os controles deslizantes do X10 acima pela conexão de configuração.")
                     GamepadVibrationAvailability.AVAILABLE -> tr(
                         "Plays a short pulse on the selected gamepad using Android. It does not preview this draft's motor intensities.",
                         "Aciona um pulso curto no controle selecionado usando o Android. O teste não reproduz as intensidades dos motores deste rascunho.")
@@ -273,12 +289,47 @@ import kotlinx.coroutines.withContext
         dismissButton = { if (onClear != null && clearLabel != null) TextButton(onClick = onClear) { Text(clearLabel) } })
 }
 
-@Composable fun ValueSlider(label: String, value: Int, range: IntRange, suffix: String = "", onChange: (Int) -> Unit) {
+@Composable fun ValueSlider(
+    label: String,
+    value: Int,
+    range: IntRange,
+    suffix: String = "",
+    previewing: Boolean = false,
+    onChangeFinished: (() -> Unit)? = null,
+    onChange: (Int) -> Unit,
+) {
     Column {
-        Row(Modifier.fillMaxWidth()) { Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium); Text("$value$suffix", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold) }
-        Slider(value.toFloat(), { onChange(it.toInt().coerceIn(range)) }, valueRange = range.first.toFloat()..range.last.toFloat(), modifier = Modifier.semantics { contentDescription = label })
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            VibrationPreviewDot(previewing)
+            Text("$value$suffix", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+        }
+        Slider(
+            value.toFloat(),
+            onValueChange = { onChange(it.toInt().coerceIn(range)) },
+            onValueChangeFinished = { onChangeFinished?.invoke() },
+            valueRange = range.first.toFloat()..range.last.toFloat(),
+            modifier = Modifier.semantics { contentDescription = label },
+        )
     }
 }
+@Composable private fun VibrationPreviewDot(active: Boolean) {
+    if (!active) return
+    val transition = rememberInfiniteTransition(label = "vibration-preview")
+    val alpha by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(500), RepeatMode.Reverse),
+        label = "vibration-preview-alpha",
+    )
+    Box(
+        Modifier
+            .padding(end = 8.dp)
+            .size(10.dp)
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = alpha), CircleShape),
+    )
+}
+
 @Composable fun RangeEditor(min: Int, max: Int, change: (Int, Int) -> Unit) {
     ResponseCurve(min, max)
     ValueSlider(tr("Ignore movement up to", "Ignorar movimentos até"), min, 0..(max - 1), "%") { change(it, max) }

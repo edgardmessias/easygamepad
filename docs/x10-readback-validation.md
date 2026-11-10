@@ -12,7 +12,9 @@ not vibrate and displayed the unsupported-device notice. Android's input dump
 and kernel input capabilities showed no vibrator/force-feedback capability for
 the connected gameplay device. The UI now disables this test when Android
 exposes no vibrator and explains that motor intensity can still be configured.
-This does not establish a separate KRLY motor-test command.
+That Android limitation is separate from the later KRLY motor tests, which the
+maintainer physically validated on the same X10. See [X10 vibration](x10-vibration-investigation.md)
+for the checked sequences and their limits.
 
 The upload keeps its existing KRLY command sequence. After returning to normal
 mode, it now queries settings (119) and mappings (80) and compares the complete

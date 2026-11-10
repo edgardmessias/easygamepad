@@ -190,17 +190,31 @@ precise presses-per-second measurement.
 ### Vibration
 
 Set the left and right motor intensities independently, from 0 to 100%.
+These sliders edit the draft; use **Apply to X10** to store them on the controller.
+
+While the X10 configuration channel is ready, hold and drag either motor slider
+to feel that motor at the chosen intensity through that connection. Releasing the
+slider stops the preview. These live previews work independently of Android
+gamepad vibration and do not store the selected intensity or apply the profile.
+Connect the configuration channel and finish any active operation or calibration
+to enable them. If vibration continues after you release the slider, turn the
+controller off before reconnecting.
+
 **Test Android gamepad vibration** uses the selected Android input device's
 vibrator, if exposed by that device. It does not apply the draft motor settings;
 availability depends on Android and the controller.
 
-The test is disabled with an explanation when no gameplay device is selected or
+The Android test is disabled with an explanation when no gameplay device is selected or
 Android exposes no vibrator for it. This can happen even when the X10's separate
 configuration connection can read and change motor intensity. On Android 12 and
 later the app uses the selected input device's vibrator manager; it never falls
-back to vibrating the phone or a different controller.
+back to vibrating the phone or a different controller. Use the X10 motor sliders
+instead when Android vibration is unavailable. Motor selection and
+changes in test intensity were physically checked on one X10; other firmware
+versions have not been verified.
+The evidence and remaining protocol limits are in [X10 vibration](x10-vibration-investigation.md).
 
-<img src="images/vibration.png" width="300" alt="Vibration editor with left and right motor intensity sliders and an Android gamepad vibration test action">
+<img src="images/vibration.png" width="300" alt="Vibration editor with left and right motor sliders for live X10 preview and an Android gamepad vibration test action">
 
 ### Apply and verify
 
@@ -296,7 +310,8 @@ preferences are stored locally; connection history is kept in memory until share
 | Profiles or Tools are missing | These require a supported configuration profile; generic Android gamepads use Test |
 | Apply is unavailable | Check connection, valid draft values and whether another operation or calibration is active |
 | A command times out | Reconnect before retrying; the app closes the session so a late response cannot confirm a later command |
-| Vibration test is unavailable | The selected gamepad may not expose a vibrator through Android |
+| Android vibration test is unavailable | The selected gamepad may not expose a vibrator through Android; move the X10 motor sliders with its configuration connection |
+| X10 motor tests are unavailable | Connect the selected X10 configuration channel and finish any active operation or calibration |
 | A profile cannot be imported | Check its format, version, device identifier and value ranges; see the development guide |
 
 For persistent problems, report the app version, Android version, controller model,

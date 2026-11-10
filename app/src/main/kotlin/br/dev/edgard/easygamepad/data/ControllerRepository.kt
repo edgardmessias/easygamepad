@@ -59,6 +59,33 @@ class ControllerRepository(val ble: BleClient, private val scope: CoroutineScope
     }
     fun notice(en: String, pt: String, error: Boolean = false) { mutableNotices.tryEmit(Notice(en, pt, error)) }
     private fun connected() = checkNotNull(session) { "Controller not connected" }
+    private suspend fun withVibrationPreview(quiet: Boolean, block: suspend (CommandSession) -> Unit): Boolean {
+        return try {
+            exclusive.withLock {
+                if (state.value.calibration.stopRequired) return@withLock false
+                block(connected())
+                true
+            }
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (error: Exception) {
+            ble.log("VIBRATION", error.message ?: error.javaClass.simpleName)
+            if (!quiet) notice("The controller did not confirm this operation. Check the connection and diagnostics.",
+                "O controle não confirmou a operação. Verifique a conexão e o diagnóstico.", true)
+            false
+        }
+    }
+    suspend fun holdX10VibrationPreview(motor: X10Motor, intensity: Int): Boolean {
+        ble.log("VIBRATION", "Holding X10 motor $motor at $intensity")
+        return withVibrationPreview(quiet = true) { X10VibrationPreview(it).hold(motor, intensity) }
+    }
+    suspend fun stopX10VibrationPreview(): Boolean {
+        ble.log("VIBRATION", "Stopping X10 motor preview")
+        return withVibrationPreview(quiet = true) { X10VibrationPreview(it).stop() }
+    }
+    fun stopX10VibrationPreviewAsync() {
+        scope.launch { stopX10VibrationPreview() }
+    }
     private suspend fun <T> runOperation(showSuccess: Boolean = true, block: suspend () -> T): T? = exclusive.withLock {
         mutableState.update { it.copy(busy = true, progress = 0f) }
         try {
@@ -102,6 +129,28 @@ class ControllerRepository(val ble: BleClient, private val scope: CoroutineScope
         check(!state.value.calibration.stopRequired)
         val firmware = requireNotNull(KrlyCodec.firmware(connected().request(132, bytes(1, 0))))
         mutableState.update { it.copy(firmware = firmware) }
+    }
+    suspend fun testVibration(motor: X10Motor, intensity: Int, quiet: Boolean = false): Boolean {
+        var completed = false
+        try {
+            runOperation(false) {
+                check(!state.value.calibration.stopRequired)
+                val active = connected()
+                ble.log("VIBRATION", "Testing X10 motor $motor with value $intensity")
+                val result = X10VibrationTest(active).run(motor, intensity)
+                completed = true
+                ble.log("VIBRATION", "Motor $motor test exchanges completed; readable settings unchanged: ${result.settingsUnchanged}; physical result not checked")
+                if (result.settingsUnchanged) {
+                    if (!quiet) notice("Test sent to X10; readable settings are unchanged.",
+                        "Teste enviado ao X10; os ajustes legíveis não mudaram.")
+                } else notice("Readable settings changed during the test. Stop testing and read the controller settings.",
+                    "Os ajustes legíveis mudaram durante o teste. Encerre os testes e leia os ajustes do controle.", true)
+            }
+            return completed
+        } finally {
+            if (!completed && !quiet) notice("The vibration test did not complete. If vibration continues, turn the controller off before reconnecting.",
+                "O teste de vibração não foi concluído. Se continuar vibrando, desligue o controle antes de reconectar.", true)
+        }
     }
     suspend fun apply(config: ControllerConfig): Boolean = runOperation(false) {
         check(!state.value.calibration.stopRequired)

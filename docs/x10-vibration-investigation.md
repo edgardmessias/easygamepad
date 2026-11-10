@@ -1,39 +1,83 @@
-# X10 vibration testing
+# X10 vibration test findings
 
-## Android input-device route
+These findings were recorded during owner-supervised tests on 2026-11-09 using
+an EasySMX X10 and an Android 15 phone. The firmware revision was not recorded.
+They apply to that controller and connection; other firmware remains unverified.
 
-The maintainer reported the unsupported-vibration notice on 2026-11-09. The
-connected Android 15 phone exposes the X10 gameplay interface as an Xbox Wireless
-Controller. Its input mapper and kernel event capabilities provide buttons and
-axes but no vibrator/force feedback. This finding applies to this connection
-mode and phone; the advertised Xbox name does not establish vibration support.
+## Android and X10 tests use separate connections
 
-EasyGamepad queries only the selected gameplay device. Android 12 and later use
-that device's `VibratorManager`; earlier releases use its legacy vibrator. The
-test stays disabled with an explanation when Android exposes no vibrator or no
-gameplay device is selected. It does not redirect a test to the phone or another
-controller. See the [Android InputDevice API](https://developer.android.com/reference/android/view/InputDevice#getVibratorManager()).
+The X10 gameplay interface appeared as **Xbox Wireless Controller**, but Android
+exposed no vibrator for it. That name does not establish vibration support.
+The Android test therefore stays disabled. It uses only the selected gamepad's
+vibrator and does not redirect vibration to the phone or another controller.
 
-## KRLY candidate
+The X10 motor tests use its separate KRLY configuration connection. Command
+**53 / 0x35** stores the motor intensity settings during profile application;
+command **69 / 0x45** is used for the temporary tests described below.
 
-The local interoperability reference for companion package `com.smx.platform`
-version 1.05 identifies command **69 / 0x45**, named `ForceVibrationTestReq` /
-`CMD_TEST_VIBRATION_FORCE`. It accepts three payload bytes. Its KRLY frame shape
-is therefore:
+## Physical observations
 
-```text
-06 45 p0 p1 p2 sequence
-```
+Each diagnostic sequence sent command 69 with the selected three-byte payload,
+waited 500 ms after its acknowledgment, then sent `0, 0, 0`. The owner initiated
+each test manually and reported these results, looking at the controller's front:
 
-The available reference does not identify the three parameters' meanings or
-units, and no calling screen or physical X10 trace establishes suitable values.
-In particular, left intensity, right intensity, duration, motor selection and a
-stop action must not be inferred from the request name. An ACK alone would not
-prove which motor moved, for how long, or whether settings stayed unchanged.
+| Candidate | Payload (decimal bytes) | Physical result |
+| --- | --- | --- |
+| 1 | `20, 0, 1` | Left grip, LT/LB side; stopped without powering off |
+| 2 | `0, 20, 1` | No perceptible vibration |
+| 3 | `20, 1, 1` | Apparently the same side as candidate 1; stopped normally |
+| 4 | `20, 0, 2` | No perceptible vibration |
+| 5 | `0, 40, 2` | Right side, RT/RB; stopped without powering off |
 
-No command 69 is currently sent by EasyGamepad. Before enabling this route,
-establish the payload semantics and a bounded start/stop test, tell the
-maintainer the exact physical test required and wait for them, then record the
-controller/firmware, observed motor behavior and unchanged settings. The existing
-command 53 changes configured motor intensities; it is not a proven substitute
-for a temporary pulse test.
+The app logs recorded accepted test and all-zero follow-up commands, with
+readable settings unchanged. The owner then tested the initial **Test left motor
+on X10** and **Test right motor on X10** buttons with fixed values and confirmed that each activated
+its corresponding side and stopped normally without an error.
+
+The first version used fixed test values. After the owner reported that moving
+the profile sliders did not change the test strength, a separate diagnostic
+allowed custom values. The owner confirmed different perceived intensities
+on both sides and normal stopping. The shipped app holds command 69 at the
+slider value while a motor slider is dragged and sends the all-zero follow-up
+when the slider is released. Logs recorded these values, with accepted
+commands and unchanged readable settings in every completed test:
+
+| Side | Values sent in the custom-value diagnostic |
+| --- | --- |
+| Left | `6, 20, 62, 85, 100` |
+| Right | `0, 6, 14, 20, 51, 100` |
+
+## Current implementation and limits
+
+Live preview uses **`X10VibrationPreview`**: command 69 with `value, 0, 1` for the
+left motor or `0, value, 2` for the right while the slider is held, then `0, 0, 0`
+on release. Preview commands use **`send`** (no ACK wait) via a serial queue so
+cancelling a drag mid-flight does not tear down the BLE session. Preview commands
+do not store the profile; **Apply to X10** (command 53) is still required.
+
+**`X10VibrationTest`** remains for diagnostics: one motor pulse with ACK, 500 ms
+wait, all-zero follow-up, and settings read-back before and after (commands 119
+and 80). It is not used in the profile editor UI.
+
+The app requires the selected X10 configuration connection to be ready and
+blocks preview during other operations, controller switching or calibration.
+
+The observations establish individual motor selection and different perceived
+intensities. They do not establish a linear percentage of physical force,
+duration units or a general motor bitmask. The stops do not distinguish an
+effect of the all-zero follow-up from a firmware timer.
+A lost connection can prevent the follow-up, so keep the app open and turn the
+controller off if vibration continues.
+
+Read-back covers only readable settings. Onboard macro sequences and
+persistence after a power cycle were not checked. An acknowledgment alone is
+not evidence of physical vibration.
+
+## Verification
+
+The implementation passed Kotlin unit tests, debug lint without errors, and
+both debug and release builds. `X10VibrationTestTest` covers the exact payloads,
+custom-value bounds, cleanup after rejection or cancellation, missing replies,
+rejected follow-ups and readable-setting changes without an automatic profile restore.
+`X10VibrationPreviewTest` covers hold and stop frames. These simulated checks
+complement the physical observations; they cannot sense motors.

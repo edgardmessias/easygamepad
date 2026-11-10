@@ -14,8 +14,8 @@ to these frames. The X10 artwork shared with x20ctl does not imply shared
 configuration support.
 
 Jump to [transport](#ble-transport), [frames and sessions](#frame-format-and-command-sessions),
-[commands and key codes](#implemented-commands), [battery](#battery-responses),
-[paged readback](#paged-readback), [versions](#firmware-information),
+[commands and key codes](#implemented-commands), [motor vibration](#motor-vibration),
+[battery](#battery-responses), [paged readback](#paged-readback), [versions](#firmware-information),
 [profile writes](#write-examples-and-profile-application), [calibration](#calibration-and-async-events)
 or [validation limits](#evidence-and-validation-limits).
 
@@ -124,6 +124,7 @@ Payload bytes in this table exclude length, command ID and sequence.
 | 62 / `3E` | Stick ranges / inversion | Left min/max/invert X/invert Y, then right equivalents | ACK |
 | 65 / `41` | Start self-calibration | Empty | ACK; result later through event 67 or 73 |
 | 66 / `42` | Stop self-calibration | Empty | ACK |
+| 69 / `45` | X10 motor test | Selected side and intensity; see below | ACK; physical effect checked separately |
 | 80 / `50` | Query mappings | `01` | Mapping pages |
 | 119 / `77` | Query settings | `02 01` | Settings pages with selector `02` |
 | 120 / `78` | Stick / trigger calibration | Action, type | Async progress and result |
@@ -134,7 +135,37 @@ The codec also parses legacy version response **9 / `09`**. The application uses
 events, not requests sent by this implementation. Lighting, sleep configuration,
 firmware uploads and other vendor commands are outside the implemented command set.
 
-### Key codes
+## Motor vibration
+
+Command **53 / `35`** stores the left and right motor intensities, each 0–100,
+during profile application. It is separate from the temporary motor test,
+command **69 / `45`**, which has three payload bytes:
+
+```text
+06 45 P0 P1 P2 SN
+```
+
+Owner-supervised checks on one X10 established these payload patterns:
+
+| Requested side | Preview / hold payload (decimal) | Stop follow-up |
+| --- | --- | --- |
+| Left (LT/LB) | `value, 0, 1` | `0, 0, 0` on slider release |
+| Right (RT/RB) | `0, value, 2` | `0, 0, 0` on slider release |
+
+In the profile editor, **`X10VibrationPreview`** sends command 69 with the draft
+value (0–100) through **`send`** while the user drags a motor slider and sends
+the all-zero follow-up when the slider is released. Preview does not write the
+profile; command 53 during apply stores intensities.
+
+**`X10VibrationTest`** is the diagnostic path: ACK on the start command, 500 ms
+wait, all-zero follow-up, and settings read-back (commands 119 and 80) before and
+after. It attempts the all-zero follow-up in cancellation cleanup if the session
+is still open; link loss can prevent it. The physical force scale, other
+motor-selector values and cause of stopping remain unconfirmed. See
+[X10 vibration test findings](x10-vibration-investigation.md) for the physical
+observations and validation limits.
+
+## Key codes
 
 These are vendor key codes, not Android `KeyEvent` codes or USB HID usages.
 
@@ -310,7 +341,7 @@ commands in this order, awaiting each ACK:
 4. Command 55 for each turbo entry.
 5. Command 57 for the trigger ranges, then 62 for the sticks.
 6. Command 61 for each mapping.
-7. Command 53 for both motor intensities.
+7. Command 53 for both motor intensities. This stores the two levels; it does not pulse the motors. See [Motor vibration](#motor-vibration).
 8. Command 52 with no payload: end/commit the upload.
 9. Command 1 with `00`: restore normal mode.
 10. Queries 119 and 80: read settings and mappings back before reporting the result.
