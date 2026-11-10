@@ -423,54 +423,6 @@ import kotlinx.coroutines.withContext
     }
 }
 
-@Composable private fun MacroEditor(macros: List<Macro>, change: (List<Macro>) -> Unit) {
-    var picker by remember { mutableStateOf<Pair<Int, Int>?>(null) }
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Description(tr("Build a sequence for a rear paddle. Each step presses a button, holds it, then waits. Up to 32 steps per paddle.", "Crie uma sequência para um botão traseiro. Cada etapa pressiona um botão, segura e espera. Até 32 etapas por botão."))
-        if (macros.isEmpty()) InfoBanner(tr("Start with a simple sequence, like A → B, assigned to M1.", "Comece com uma sequência simples, como A → B, atribuída ao M1."))
-        macros.forEachIndexed { index, macro ->
-            fun update(updated: Macro) = change(macros.toMutableList().also { it[index] = updated })
-            HubCard(Modifier.fillMaxWidth()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(macro.trigger.label, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { change(macros.filterIndexed { i, _ -> i != index }) }) { Text(tr("Remove from profile", "Remover do perfil")) }
-                }
-                ToggleRow(tr("Repeat sequence", "Repetir sequência"), macro.repeat) { update(macro.copy(repeat = it)) }
-                macro.steps.forEachIndexed { stepIndex, step ->
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Mono("%02d".format(stepIndex + 1))
-                        OutlinedButton(onClick = { picker = index to stepIndex }) { Text(step.key.label) }
-                        Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { if (stepIndex > 0) update(macro.copy(steps = macro.steps.toMutableList().also { java.util.Collections.swap(it, stepIndex, stepIndex - 1) })) }, enabled = stepIndex > 0) { Text("↑") }
-                        val removeLabel = tr("Remove step", "Remover etapa")
-                        IconButton(onClick = { update(macro.copy(steps = macro.steps.filterIndexed { i, _ -> i != stepIndex })) }, modifier = Modifier.semantics { contentDescription = removeLabel }) { HubIcon(Glyph.CLOSE, Modifier.size(18.dp)) }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        NumberField(tr("Hold (ms)", "Pressionar (ms)"), step.holdMs, 1..65535, Modifier.weight(1f)) { value -> update(macro.copy(steps = macro.steps.toMutableList().also { it[stepIndex] = step.copy(holdMs = value) })) }
-                        NumberField(tr("Wait (ms)", "Esperar (ms)"), step.delayMs, 0..65535, Modifier.weight(1f)) { value -> update(macro.copy(steps = macro.steps.toMutableList().also { it[stepIndex] = step.copy(delayMs = value) })) }
-                    }
-                }
-                OutlinedButton(onClick = { update(macro.copy(steps = macro.steps + MacroStep())) }, enabled = macro.steps.size < 32, modifier = Modifier.fillMaxWidth()) { Text(tr("Add step", "Adicionar etapa")) }
-                if (macro.steps.isEmpty()) Description(tr("Add at least one step before saving or applying.", "Adicione pelo menos uma etapa antes de salvar ou aplicar."))
-            }
-        }
-        Description(tr("Removing a macro from the profile omits its steps from upload. It does not request deletion of an onboard sequence.",
-            "Remover uma macro do perfil omite suas etapas do envio. Isso não solicita a exclusão de uma sequência no controle."))
-        val available = listOf(PadKey.M1, PadKey.M2).filter { key -> macros.none { it.trigger == key } }
-        if (available.isNotEmpty()) {
-            Eyebrow(tr("Add a paddle sequence", "Adicionar sequência traseira"))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                available.forEach { key -> OutlinedButton(onClick = { change(macros + Macro(key, steps = listOf(MacroStep()))) }) { Text("+ ${key.label}") } }
-            }
-        }
-    }
-    picker?.let { (index, stepIndex) -> KeyPicker(tr("Step button", "Botão da etapa"), PadKey.outputs, { picker = null }) { key ->
-        val macro = macros[index]
-        change(macros.toMutableList().also { it[index] = macro.copy(steps = macro.steps.toMutableList().also { steps -> steps[stepIndex] = steps[stepIndex].copy(key = key) }) }); picker = null
-    } }
-}
-
 @Composable private fun ExactValueField(value: Int, range: IntRange, suffix: String, modifier: Modifier, change: (Int) -> Unit) {
     var focused by remember { mutableStateOf(false) }
     var text by remember(value) { mutableStateOf(value.toString()) }
@@ -496,40 +448,3 @@ import kotlinx.coroutines.withContext
     )
 }
 
-@Composable private fun NumberField(label: String, value: Int, range: IntRange, modifier: Modifier, change: (Int) -> Unit) {
-    var focused by remember { mutableStateOf(false) }
-    var text by remember(value) { mutableStateOf(value.toString()) }
-    LaunchedEffect(value) { if (!focused) text = value.toString() }
-    OutlinedTextField(text, { candidate ->
-        if (candidate.length > 5) return@OutlinedTextField
-        if (candidate.isEmpty() || candidate.all(Char::isDigit)) {
-            text = candidate
-            candidate.toIntOrNull()?.takeIf { it in range }?.let(change)
-        }
-    }, label = { Text(label) }, singleLine = true, isError = text.isNotEmpty() && text.toIntOrNull() !in range, modifier = modifier.onFocusChanged {
-        focused = it.isFocused
-        if (!it.isFocused) text = value.toString()
-    },
-        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
-}
-
-@Composable private fun TurboEditor(turbos: List<Turbo>, change: (List<Turbo>) -> Unit) {
-    var picker by remember { mutableStateOf(false) }
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Description(tr("Make a button repeat automatically. Choose the number of presses per second. Automatic turbo behavior depends on your controller.", "Faça um botão repetir automaticamente. Escolha quantas vezes por segundo ele será pressionado. O turbo automático depende do modo do controle."))
-        turbos.forEachIndexed { index, turbo ->
-            fun update(value: Turbo) = change(turbos.toMutableList().also { it[index] = value })
-            HubCard(Modifier.fillMaxWidth()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(turbo.key.label, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { change(turbos.filterIndexed { i, _ -> i != index }) }) { Text(tr("Remove from profile", "Remover do perfil")) }
-                }
-                ValueSlider(tr("Presses per second", "Pressionamentos por segundo"), turbo.rate, 1..20, exactInput = true) { update(turbo.copy(rate = it)) }
-                ToggleRow(tr("Automatic turbo", "Turbo automático"), turbo.automatic) { update(turbo.copy(automatic = it)) }
-            }
-        }
-        OutlinedButton(onClick = { picker = true }, enabled = turbos.size < PadKey.outputs.size, modifier = Modifier.fillMaxWidth()) { Text(tr("Add turbo button", "Adicionar botão turbo")) }
-        Description(tr("Removing turbo here may leave the previous turbo setting on your controller. Get the settings from X10 after applying to check.", "Remover o turbo aqui pode manter o ajuste anterior no controle. Use Trazer ajustes do X10 depois de aplicar para conferir."))
-    }
-    if (picker) KeyPicker(tr("Turbo button", "Botão turbo"), PadKey.outputs.filter { key -> turbos.none { it.key == key } }, { picker = false }) { key -> change(turbos + Turbo(key)); picker = false }
-}
