@@ -26,6 +26,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -76,7 +77,8 @@ import kotlinx.coroutines.withContext
     var loadDialog by remember { mutableStateOf<ControllerConfig?>(null) }
     var deleteDialog by remember { mutableStateOf<String?>(null) }
     var exportSnapshot by remember { mutableStateOf<ControllerConfig?>(null) }
-    val draftValid = remember(draft) { runCatching { draft.validate() }.isSuccess }
+    val validationIssues = remember(draft) { draft.profileValidationIssues() }
+    val draftValid = validationIssues.isEmpty()
     val editorUi = profilesEditorUiState(link.phase, hardware.busy, hardware.calibration, draftValid)
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         val snapshot = exportSnapshot
@@ -141,7 +143,10 @@ import kotlinx.coroutines.withContext
                     HubIcon(Glyph.DOWNLOAD, color = MaterialTheme.colorScheme.primary)
                 }
             }
-            if (editingName) OutlinedTextField(draft.name, { name -> model.edit { it.copy(name = name.take(40)) } }, modifier = Modifier.fillMaxWidth(), label = { Text(tr("Profile name", "Nome do perfil")) }, singleLine = true, isError = draft.name.isBlank())
+            if (editingName) OutlinedTextField(draft.name, { name -> model.edit { it.copy(name = name.take(40)) } }, modifier = Modifier.fillMaxWidth(), label = { Text(tr("Profile name", "Nome do perfil")) }, singleLine = true,
+                isError = validationIssues.any { it.field == br.dev.edgard.easygamepad.protocol.ProfileField.NAME },
+                supportingText = validationIssues.firstOrNull { it.field == br.dev.edgard.easygamepad.protocol.ProfileField.NAME }?.localizedMessage()?.let { { Text(it) } })
+            ProfileValidationBanner(if (editingName) validationIssues.filter { it.field != br.dev.edgard.easygamepad.protocol.ProfileField.NAME } else validationIssues)
             hardware.settingsReadAt?.let { Description(tr("Last read from controller: ", "Última leitura do controle: ") + timeLabel(it)) }
         }
         ProfileEditorSectionNav(sectionLabels, section, { model.profileSection.value = it })
@@ -214,10 +219,16 @@ import kotlinx.coroutines.withContext
                 Description(tr("Set the intensity of each controller motor. Availability depends on the controller's operating mode.", "Ajuste a intensidade de cada motor do controle. A disponibilidade depende do modo de operação."))
                 ValueSlider(tr("Left motor", "Motor esquerdo"), draft.leftVibration, 0..100, "%",
                     previewing = x10VibrationPreview.busy(X10Motor.LEFT),
-                    onChange = model::setLeftVibration, onChangeFinished = model::finishLeftVibrationPreview)
+                    exactInput = true,
+                    onChange = { value -> model.edit { it.copy(leftVibration = value) } },
+                    onSliderChange = model::setLeftVibration,
+                    onChangeFinished = model::finishLeftVibrationPreview)
                 ValueSlider(tr("Right motor", "Motor direito"), draft.rightVibration, 0..100, "%",
                     previewing = x10VibrationPreview.busy(X10Motor.RIGHT),
-                    onChange = model::setRightVibration, onChangeFinished = model::finishRightVibrationPreview)
+                    exactInput = true,
+                    onChange = { value -> model.edit { it.copy(rightVibration = value) } },
+                    onSliderChange = model::setRightVibration,
+                    onChangeFinished = model::finishRightVibrationPreview)
                 Description(tr("While the X10 configuration channel is ready, hold and drag a slider to feel that motor at the chosen intensity. Release the slider to stop. Nothing is saved until you apply the profile. If vibration continues after release, turn the controller off.",
                     "Com o canal de configuração do X10 pronto, mantenha e arraste um controle para sentir aquele motor na intensidade escolhida. Solte para parar. Nada é gravado até você aplicar o perfil. Se continuar vibrando após soltar, desligue o controle."))
                 if (!canTestX10Vibration) Description(tr("Connect the X10 configuration channel and finish any active operation to preview motor intensity on the controller.",
@@ -256,8 +267,10 @@ import kotlinx.coroutines.withContext
         }
     }
     ScreenBottomActions(
-        tr("Edits reach your controller when you apply.", "Os ajustes só mudam no controle ao aplicar."),
-        showHint = !shortWindow,
+        if (!draftValid) profileSaveBlockedReason(validationIssues)
+            ?: tr("Edits reach your controller when you apply.", "Os ajustes só mudam no controle ao aplicar.")
+        else tr("Edits reach your controller when you apply.", "Os ajustes só mudam no controle ao aplicar."),
+        showHint = !shortWindow || !draftValid,
         tr("Save profile", "Salvar perfil"),
         tr("Apply to X10", "Aplicar ao X10"),
         onSecondary = model::save,
@@ -306,18 +319,37 @@ import kotlinx.coroutines.withContext
     range: IntRange,
     suffix: String = "",
     previewing: Boolean = false,
+    exactInput: Boolean = false,
     onChangeFinished: (() -> Unit)? = null,
+    onSliderChange: ((Int) -> Unit)? = null,
     onChange: (Int) -> Unit,
 ) {
+    val sliderChange: (Int) -> Unit = { value ->
+        if (onSliderChange != null) {
+            MotorVibrationInput.applySliderChange(value, onChange, onSliderChange)
+        } else {
+            onChange(value)
+        }
+    }
     Column {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
             VibrationPreviewDot(previewing)
-            Text("$value$suffix", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+            if (exactInput) {
+                ExactValueField(value, range, suffix, Modifier.widthIn(min = 72.dp, max = 96.dp)) { value ->
+                    if (onSliderChange != null) {
+                        MotorVibrationInput.applyNumericChange(value, onChange, onSliderChange)
+                    } else {
+                        onChange(value)
+                    }
+                }
+            } else {
+                Text("$value$suffix", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+            }
         }
         Slider(
             value.toFloat(),
-            onValueChange = { onChange(it.toInt().coerceIn(range)) },
+            onValueChange = { sliderChange(it.toInt().coerceIn(range)) },
             onValueChangeFinished = { onChangeFinished?.invoke() },
             valueRange = range.first.toFloat()..range.last.toFloat(),
             modifier = Modifier.semantics { contentDescription = label },
@@ -343,8 +375,8 @@ import kotlinx.coroutines.withContext
 
 @Composable fun RangeEditor(min: Int, max: Int, change: (Int, Int) -> Unit) {
     ResponseCurve(min, max)
-    ValueSlider(tr("Ignore movement up to", "Ignorar movimentos até"), min, 0..(max - 1), "%") { change(it, max) }
-    ValueSlider(tr("Reach maximum at", "Atingir o máximo em"), max, (min + 1)..100, "%") { change(min, it) }
+    ValueSlider(tr("Ignore movement up to", "Ignorar movimentos até"), min, 0..(max - 1), "%", exactInput = true) { change(it, max) }
+    ValueSlider(tr("Reach maximum at", "Atingir o máximo em"), max, (min + 1)..100, "%", exactInput = true) { change(min, it) }
 }
 
 @Composable private fun ResponseCurve(min: Int, max: Int) {
@@ -428,14 +460,45 @@ import kotlinx.coroutines.withContext
     } }
 }
 
-@Composable private fun NumberField(label: String, value: Int, range: IntRange, modifier: Modifier, change: (Int) -> Unit) {
+@Composable private fun ExactValueField(value: Int, range: IntRange, suffix: String, modifier: Modifier, change: (Int) -> Unit) {
+    var focused by remember { mutableStateOf(false) }
     var text by remember(value) { mutableStateOf(value.toString()) }
+    LaunchedEffect(value) { if (!focused) text = value.toString() }
+    OutlinedTextField(
+        text,
+        { candidate ->
+            if (candidate.length > 5) return@OutlinedTextField
+            if (candidate.isEmpty() || candidate.all(Char::isDigit)) {
+                text = candidate
+                candidate.toIntOrNull()?.takeIf { it in range }?.let(change)
+            }
+        },
+        singleLine = true,
+        isError = text.isNotEmpty() && text.toIntOrNull() !in range,
+        suffix = { Text(suffix) },
+        modifier = modifier.onFocusChanged {
+            focused = it.isFocused
+            if (!it.isFocused) text = value.toString()
+        },
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+        textStyle = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+    )
+}
+
+@Composable private fun NumberField(label: String, value: Int, range: IntRange, modifier: Modifier, change: (Int) -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    var text by remember(value) { mutableStateOf(value.toString()) }
+    LaunchedEffect(value) { if (!focused) text = value.toString() }
     OutlinedTextField(text, { candidate ->
-        if (candidate.length <= 5 && candidate.all(Char::isDigit)) {
+        if (candidate.length > 5) return@OutlinedTextField
+        if (candidate.isEmpty() || candidate.all(Char::isDigit)) {
             text = candidate
             candidate.toIntOrNull()?.takeIf { it in range }?.let(change)
         }
-    }, label = { Text(label) }, singleLine = true, isError = text.toIntOrNull() !in range, modifier = modifier,
+    }, label = { Text(label) }, singleLine = true, isError = text.isNotEmpty() && text.toIntOrNull() !in range, modifier = modifier.onFocusChanged {
+        focused = it.isFocused
+        if (!it.isFocused) text = value.toString()
+    },
         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
 }
 
@@ -450,7 +513,7 @@ import kotlinx.coroutines.withContext
                     Text(turbo.key.label, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                     TextButton(onClick = { change(turbos.filterIndexed { i, _ -> i != index }) }) { Text(tr("Remove from profile", "Remover do perfil")) }
                 }
-                ValueSlider(tr("Presses per second", "Pressionamentos por segundo"), turbo.rate, 1..20) { update(turbo.copy(rate = it)) }
+                ValueSlider(tr("Presses per second", "Pressionamentos por segundo"), turbo.rate, 1..20, exactInput = true) { update(turbo.copy(rate = it)) }
                 ToggleRow(tr("Automatic turbo", "Turbo automático"), turbo.automatic) { update(turbo.copy(automatic = it)) }
             }
         }
