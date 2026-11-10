@@ -63,6 +63,44 @@ class X10ProfileClientTest {
         override fun abort(cause: Throwable) { aborted = true }
     }
 
+    @Test fun applyEmitsOrderedUploadOpcodesThroughReadBack() = runTest {
+        val pad = Pad()
+        val config = ControllerConfig(
+            leftVibration = 25,
+            rightVibration = 35,
+            mappings = ControllerConfig().mappings + (PadKey.M1 to PadKey.A),
+            turbos = listOf(Turbo(PadKey.B, automatic = true, rate = 10)),
+        )
+        val planned = config.x10UploadPlan().commands.map { it.first }
+        val client = X10ProfileClient(CommandSession(pad, backgroundScope))
+        client.apply(config)
+        val opcodes = pad.requests.map { it[1].u8() }
+        assertEquals(1, opcodes.first())
+        assertEquals(54, opcodes[1])
+        assertEquals(planned, opcodes.subList(2, 2 + planned.size))
+        assertEquals(listOf(1, 119, 80), opcodes.takeLast(3))
+    }
+
+    @Test fun applyStartsWithEditingModeBeforeFeatureWrites() = runTest {
+        val pad = Pad()
+        val client = X10ProfileClient(CommandSession(pad, backgroundScope))
+        client.apply(
+            ControllerConfig(
+                leftVibration = 25,
+                rightVibration = 35,
+                mappings = ControllerConfig().mappings + (PadKey.M1 to PadKey.A),
+                turbos = listOf(Turbo(PadKey.B, automatic = true, rate = 10)),
+            ),
+        )
+        assertTrue(pad.requests.isNotEmpty())
+        assertEquals(1, pad.requests.first()[1].u8())
+        assertTrue(pad.requests.any { it[1].u8() == 54 })
+        assertTrue(pad.requests.any { it[1].u8() == 53 })
+        assertTrue(pad.requests.any { it[1].u8() == 61 })
+        assertTrue(pad.requests.any { it[1].u8() == 119 })
+        assertTrue(pad.requests.any { it[1].u8() == 80 })
+    }
+
     @Test fun uploadReturnsToNormalModeThenReadsBothQueriesBeforeReportingAMatch() = runTest {
         val pad = Pad()
         val client = X10ProfileClient(CommandSession(pad, backgroundScope))

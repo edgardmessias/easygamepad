@@ -41,25 +41,16 @@ class X10ProfileClient(private val session: CommandSession) {
     }
 
     suspend fun apply(config: ControllerConfig, uploadMode: (Boolean) -> Unit = {}, progress: (Float) -> Unit = {}): X10ApplyResult {
-        config.validate()
+        val plan = config.x10UploadPlan()
         var modeEntered = false
         fun setMode(entered: Boolean) { modeEntered = entered; uploadMode(entered) }
         try {
             session.ack(1, bytes(16))
             setMode(true)
             session.ack(54, bytes(0, 0))
-            val commands = buildList<Pair<Int, ByteArray>> {
-                config.macros.forEach { macro -> macro.steps.indices.forEach { add(58 to KrlyCodec.macroStep(macro, it)) } }
-                config.turbos.forEach { add(55 to bytes(it.key.code, if (it.automatic) 1 else 0, it.rate)) }
-                add(57 to bytes(config.leftTrigger.min, config.leftTrigger.max, config.rightTrigger.min, config.rightTrigger.max))
-                add(62 to KrlyCodec.sticks(config.leftStick, config.rightStick))
-                config.mappings.forEach { (from, to) -> add(61 to bytes(from.code, to.code)) }
-                add(53 to bytes(config.leftVibration, config.rightVibration))
-                add(52 to byteArrayOf())
-            }
-            commands.forEachIndexed { index, (id, payload) ->
+            plan.commands.forEachIndexed { index, (id, payload) ->
                 session.ack(id, payload)
-                progress(.75f * (index + 1f) / commands.size)
+                progress(.75f * (index + 1f) / plan.commands.size)
             }
             session.ack(1, bytes(0))
             setMode(false)

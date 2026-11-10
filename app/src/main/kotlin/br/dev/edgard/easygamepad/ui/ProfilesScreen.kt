@@ -62,7 +62,7 @@ import kotlinx.coroutines.withContext
     var rear by rememberSaveable { mutableStateOf(false) }
     var showAllButtons by rememberSaveable { mutableStateOf(false) }
     var keyPicker by remember { mutableStateOf<PadKey?>(null) }
-    var applyDialog by remember { mutableStateOf(false) }
+    var applySnapshot by remember { mutableStateOf<ControllerConfig?>(null) }
     var readDialog by remember { mutableStateOf(false) }
     var loadDialog by remember { mutableStateOf<ControllerConfig?>(null) }
     var deleteDialog by remember { mutableStateOf<String?>(null) }
@@ -168,7 +168,7 @@ import kotlinx.coroutines.withContext
                     (PadKey.outputs + listOf(PadKey.M1, PadKey.M2) + listOf(PadKey.M3, PadKey.M4).filter { it in draft.mappings }).chunked(2).forEach { pair ->
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             pair.forEach { source ->
-                                val target = draft.mappings[source] ?: source.takeIf { it in PadKey.outputs }
+                                val target = draft.mappings[source]
                                 Surface(onClick = { keyPicker = source }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
                                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -177,7 +177,7 @@ import kotlinx.coroutines.withContext
                                         }
                                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                             HubIcon(Glyph.ARROW, Modifier.size(14.dp), MaterialTheme.colorScheme.onSurfaceVariant)
-                                            Text(target?.label ?: tr("None", "Sem função"), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge,
+                                            Text(target?.label ?: tr("Not sent", "Não enviado"), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge,
                                                 color = if (target != null && target != source) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
                                     }
@@ -188,7 +188,7 @@ import kotlinx.coroutines.withContext
                 }
                 }
                 TextButton(onClick = { model.edit { it.copy(mappings = it.mappings + PadKey.outputs.associateWith { key -> key }) } }) { Text(tr("Restore default button functions", "Restaurar funções originais dos botões")) }
-                Description(tr("Removing a rear button function here may leave its previous function on the controller. Apply your changes, then get the settings from X10 to check.", "Remover uma função traseira aqui pode manter a função anterior no controle. Aplique as alterações e use Trazer ajustes do X10 para conferir."))
+                Description(tr("An unlisted assignment is not sent and does not request deletion. Existing assignments may remain on the X10. Restoring a standard button sends its own output explicitly.", "Uma atribuição ausente não é enviada e não solicita exclusão. As atribuições existentes podem permanecer no X10. Restaurar um botão padrão envia sua própria função explicitamente."))
             }
             1 -> {
                 Description(tr("Reduce unwanted movement near the center or choose how far you move the stick to reach full speed.", "Reduza movimentos involuntários perto do centro ou escolha quanto mover o analógico para atingir a velocidade máxima."))
@@ -250,14 +250,14 @@ import kotlinx.coroutines.withContext
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = model::save, enabled = runCatching { draft.validate() }.isSuccess,
                     modifier = Modifier.weight(1f)) { Text(tr("Save profile", "Salvar perfil")) }
-                Button(onClick = { applyDialog = true }, enabled = link.phase == LinkPhase.READY && !hardware.busy && !hardware.calibration.stopRequired && runCatching { draft.validate() }.isSuccess,
+                Button(onClick = { applySnapshot = draft }, enabled = link.phase == LinkPhase.READY && !hardware.busy && !hardware.calibration.stopRequired && runCatching { draft.validate() }.isSuccess,
                     modifier = Modifier.weight(1f)) { Text(tr("Apply to X10", "Aplicar ao X10")) }
             }
         }
     }
     }
     keyPicker?.let { source -> KeyPicker(tr("Output for ", "Função para ") + source.label, PadKey.outputs, onDismiss = { keyPicker = null },
-        clearLabel = if (source in PadKey.outputs) tr("Restore standard output", "Restaurar função padrão") else tr("Remove assignment", "Remover atribuição"),
+        clearLabel = if (source in PadKey.outputs) tr("Restore standard output", "Restaurar função padrão") else tr("Do not send assignment", "Não enviar atribuição"),
         onClear = { model.edit { it.copy(mappings = if (source in PadKey.outputs) it.mappings + (source to source) else it.mappings - source) }; keyPicker = null }) { target ->
         model.edit { it.copy(mappings = it.mappings + (source to target)) }; keyPicker = null
     } }
@@ -265,10 +265,10 @@ import kotlinx.coroutines.withContext
         tr("Replace the profile you are editing with the settings on your X10? Save first if you want to keep your edits. The profile name and macro sequences will be kept.",
             "Substituir o perfil em edição pelos ajustes do seu X10? Salve antes se quiser guardar suas alterações. O nome do perfil e as sequências de macro serão mantidos."),
         tr("Get settings", "Trazer ajustes"), { readDialog = false }) { readDialog = false; model.readController() }
-    if (applyDialog) ConfirmDialog(tr("Apply this setup?", "Aplicar esta configuração?"),
-        tr("Send this profile to your X10? Keep it nearby while the app sends and reads back the settings. Macro sequences and persistence after power-off cannot be checked here. Removing a macro from this profile does not erase one already saved on the controller.",
-            "Enviar este perfil para seu X10? Mantenha-o por perto enquanto o app envia e relê os ajustes. As sequências de macro e a persistência após desligar não podem ser conferidas aqui. Remover uma macro deste perfil não apaga uma sequência já salva no controle."),
-        tr("Apply setup", "Aplicar configuração"), { applyDialog = false }) { applyDialog = false; model.apply() }
+    applySnapshot?.let { snapshot ->
+        X10ApplyDialog(snapshot, link.phase == LinkPhase.READY && !hardware.busy && !hardware.calibration.stopRequired,
+            dismiss = { applySnapshot = null }, apply = { applySnapshot = null; model.apply(snapshot) })
+    }
     loadDialog?.let { config -> ConfirmDialog(tr("Load profile?", "Carregar perfil?"), tr("This replaces the profile you are editing. Save first if you want to keep your changes.", "Isso substitui o perfil em edição. Salve antes se quiser guardar suas alterações."), tr("Load", "Carregar"), { loadDialog = null }) { model.load(config); loadDialog = null } }
     deleteDialog?.let { id -> ConfirmDialog(tr("Delete saved profile?", "Excluir perfil salvo?"), tr("The saved copy will be removed from this phone.", "A cópia salva será removida deste celular."), tr("Delete", "Excluir"), { deleteDialog = null }) { model.delete(id); deleteDialog = null } }
 }
@@ -379,7 +379,7 @@ import kotlinx.coroutines.withContext
             HubCard(Modifier.fillMaxWidth()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(macro.trigger.label, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { change(macros.filterIndexed { i, _ -> i != index }) }) { Text(tr("Remove", "Remover")) }
+                    TextButton(onClick = { change(macros.filterIndexed { i, _ -> i != index }) }) { Text(tr("Remove from profile", "Remover do perfil")) }
                 }
                 ToggleRow(tr("Repeat sequence", "Repetir sequência"), macro.repeat) { update(macro.copy(repeat = it)) }
                 macro.steps.forEachIndexed { stepIndex, step ->
@@ -401,6 +401,8 @@ import kotlinx.coroutines.withContext
                 if (macro.steps.isEmpty()) Description(tr("Add at least one step before saving or applying.", "Adicione pelo menos uma etapa antes de salvar ou aplicar."))
             }
         }
+        Description(tr("Removing a macro from the profile omits its steps from upload. It does not request deletion of an onboard sequence.",
+            "Remover uma macro do perfil omite suas etapas do envio. Isso não solicita a exclusão de uma sequência no controle."))
         val available = listOf(PadKey.M1, PadKey.M2).filter { key -> macros.none { it.trigger == key } }
         if (available.isNotEmpty()) {
             Eyebrow(tr("Add a paddle sequence", "Adicionar sequência traseira"))
@@ -435,7 +437,7 @@ import kotlinx.coroutines.withContext
             HubCard(Modifier.fillMaxWidth()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(turbo.key.label, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { change(turbos.filterIndexed { i, _ -> i != index }) }) { Text(tr("Remove", "Remover")) }
+                    TextButton(onClick = { change(turbos.filterIndexed { i, _ -> i != index }) }) { Text(tr("Remove from profile", "Remover do perfil")) }
                 }
                 ValueSlider(tr("Presses per second", "Pressionamentos por segundo"), turbo.rate, 1..20) { update(turbo.copy(rate = it)) }
                 ToggleRow(tr("Automatic turbo", "Turbo automático"), turbo.automatic) { update(turbo.copy(automatic = it)) }

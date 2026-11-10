@@ -308,9 +308,9 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
         }
     } }
     fun readVersions() { if (configurationTarget()) viewModelScope.launch { repository.readVersions() } }
-    fun apply() {
+    fun apply(snapshot: ControllerConfig = draft.value) {
         stopActiveVibrationPreview()
-        if (configurationTarget()) { val snapshot = draft.value; viewModelScope.launch { repository.apply(snapshot) } }
+        if (configurationTarget()) viewModelScope.launch { repository.apply(snapshot) }
     }
     fun save() { viewModelScope.launch { runCatching { app.store.save(SavedProfile(UUID.randomUUID().toString(), draft.value)) }
         .onSuccess { repository.notice("Profile saved on this phone", "Perfil salvo neste celular") }
