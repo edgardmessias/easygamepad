@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import br.dev.edgard.easygamepad.data.ConsumerCopy
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -81,11 +82,7 @@ import br.dev.edgard.easygamepad.protocol.GattProfile
             } else if (prefs.storageWarnings.isNotEmpty()) {
                 val skipped = prefs.storageWarnings.sumOf { it.skippedEntries }
                 val unreadable = prefs.storageWarnings.any { it.rootUnreadable }
-                val detail = when {
-                    unreadable && skipped > 0 -> tr("Some saved data could not be read ($skipped entries skipped). Export valid profiles before fixing storage.", "Parte dos dados salvos não pôde ser lida ($skipped entradas ignoradas). Exporte perfis válidos antes de corrigir o armazenamento.")
-                    unreadable -> tr("A saved data block could not be read. Valid entries are still shown; broken bytes were not rewritten.", "Um bloco de dados salvos não pôde ser lido. As entradas válidas continuam visíveis; os bytes corrompidos não foram regravados.")
-                    else -> tr("$skipped saved entries were skipped because they are invalid. The rest is intact.", "$skipped entradas salvas foram ignoradas por estarem inválidas. O restante está intacto.")
-                }
+                val detail = ConsumerCopy.storageSkippedWarning(skipped, unreadable, LocalPortuguese.current)
                 InfoBanner(detail, error = true)
             }
         }

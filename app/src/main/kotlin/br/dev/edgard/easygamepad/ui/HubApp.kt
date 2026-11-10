@@ -51,6 +51,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.view.WindowCompat
 import br.dev.edgard.easygamepad.HubViewModel
 import br.dev.edgard.easygamepad.ble.*
+import br.dev.edgard.easygamepad.data.ConsumerCopy
 import br.dev.edgard.easygamepad.data.HardwareState
 import br.dev.edgard.easygamepad.data.controllerStatus
 import br.dev.edgard.easygamepad.protocol.GattProfile
@@ -83,8 +84,11 @@ import java.util.Locale
         val largeText = LocalDensity.current.fontScale >= 1.3f
         val reducedMotion = rememberReducedMotion()
         val chooserLabel = tr("Choose controller: ", "Escolher controle: ") + (controller?.name ?: tr("None selected", "Nenhum selecionado"))
-        val chooserState = (if (status.gameplayConnected) tr("Game connected", "Jogo conectado") else tr("Game offline", "Jogo desconectado")) + ", " +
-            (if (status.configurationConnected) tr("App connected", "App conectado") else tr("App offline", "App desconectado"))
+        val chooserState = ConsumerCopy.chooserSummary(
+            status.gameplayConnected,
+            status.configurationConnected,
+            LocalPortuguese.current,
+        )
         LaunchedEffect(controller?.id, controller?.supportsConfiguration, keyLinkerDevice) {
             val krly = controller?.supportsConfiguration == true
             if (controller != null && ((!krly && !keyLinkerDevice && model.tab.value == 1) || (!krly && model.tab.value == 3))) model.tab.value = 2

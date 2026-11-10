@@ -17,4 +17,9 @@ class AppLanguageTest {
         assertEquals("en", AppLanguage.resolve("en", listOf("pt-BR")))
         assertEquals("pt-BR", AppLanguage.resolve("pt-BR", listOf("en")))
     }
+
+    @Test fun unsupportedLocaleFallsBackToEnglishWithoutMigratingPreference() {
+        assertEquals("en", AppLanguage.resolve("auto", listOf("de-DE", "fr-FR")))
+        assertEquals("en", AppLanguage.resolve("auto", listOf("zh-CN")))
+    }
 }

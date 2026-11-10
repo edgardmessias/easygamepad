@@ -22,6 +22,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import br.dev.edgard.easygamepad.HubViewModel
+import br.dev.edgard.easygamepad.data.ConsumerCopy
 import br.dev.edgard.easygamepad.input.InputChipState
 import br.dev.edgard.easygamepad.input.InputState
 import br.dev.edgard.easygamepad.input.inputChipState
@@ -105,7 +106,7 @@ import java.util.Locale
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatusPill(if (hasInput) tr("Input active", "Entrada ativa") else tr("No input selected", "Nenhuma entrada selecionada"), hasInput)
-            StatusPill(tr("${state.tested.size} buttons tested", "${state.tested.size} botões testados"), state.tested.isNotEmpty(), color = MaterialTheme.colorScheme.secondary)
+            StatusPill(ConsumerCopy.buttonsTestedCount(state.tested.size, LocalPortuguese.current), state.tested.isNotEmpty(), color = MaterialTheme.colorScheme.secondary)
         }
         if (hasInput) {
             selectedPadLabel(state, LocalPortuguese.current)?.let { Description(it) }

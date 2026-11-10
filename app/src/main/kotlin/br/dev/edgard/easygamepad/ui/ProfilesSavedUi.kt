@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
+import br.dev.edgard.easygamepad.data.ConsumerCopy
 
 @Composable
 fun ProfileEditorBottomBar(
@@ -38,7 +39,7 @@ fun ProfileEditorBottomBar(
             if (editingSavedCopy) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedButton(onClick = onUpdateSaved, enabled = canSave, modifier = Modifier.weight(1f)) {
-                        Text(tr("Update saved", "Atualizar salvo"))
+                        Text(ConsumerCopy.updateSavedCopyAction(LocalPortuguese.current))
                     }
                     OutlinedButton(onClick = onSaveAsNew, enabled = canSave && canSaveNewCopy, modifier = Modifier.weight(1f)) {
                         Text(tr("Save as new", "Salvar como novo"))
@@ -46,11 +47,11 @@ fun ProfileEditorBottomBar(
                 }
             } else {
                 OutlinedButton(onClick = onSaveNew, enabled = canSave && canSaveNewCopy, modifier = Modifier.fillMaxWidth()) {
-                    Text(tr("Save profile", "Salvar perfil"))
+                    Text(ConsumerCopy.saveProfileAction(LocalPortuguese.current))
                 }
             }
             Button(onClick = onApply, enabled = canApply, modifier = Modifier.fillMaxWidth()) {
-                Text(tr("Apply to X10", "Aplicar ao X10"))
+                Text(ConsumerCopy.applyToX10Action(LocalPortuguese.current))
             }
         }
     }

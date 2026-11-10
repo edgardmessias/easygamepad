@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import br.dev.edgard.easygamepad.data.EditorSaveBinding
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import br.dev.edgard.easygamepad.HubViewModel
+import br.dev.edgard.easygamepad.data.ConsumerCopy
 import br.dev.edgard.easygamepad.data.ControllerArtworkCatalog
 import br.dev.edgard.easygamepad.ble.LinkPhase
 import br.dev.edgard.easygamepad.data.DraftStatusKind
@@ -117,7 +118,7 @@ import kotlinx.coroutines.withContext
     Box(Modifier.fillMaxSize()) {
     ScreenColumn(Modifier.padding(bottom = actionSpace), scrollState = profileScroll) {
         ScreenHeading(tr("Your setup", "Seus ajustes"), tr("Make it yours.", "Do seu jeito."))
-        SectionTitle(tr("Saved profiles", "Perfis salvos") + " · ${prefs.profiles.size}/30",
+        SectionTitle(ConsumerCopy.savedProfileQuota(prefs.profiles.size, portuguese = LocalPortuguese.current),
             if (savedVisible) tr("Hide", "Ocultar") else tr("Open", "Abrir")) { savedVisible = !savedVisible }
         if (savedVisible) {
             if (prefs.profiles.isEmpty()) Description(tr("No saved copies yet. Save your draft to keep it on this phone.", "Nenhuma cópia salva ainda. Salve seu rascunho para guardá-lo neste celular."))
@@ -153,7 +154,7 @@ import kotlinx.coroutines.withContext
                 Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = CircleShape) {
                     Text(tr("Editing", "Em edição"), Modifier.padding(horizontal = 10.dp, vertical = 6.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
                 }
-                val readLabel = tr("Get settings from X10", "Trazer ajustes do X10")
+                val readLabel = ConsumerCopy.readFromX10Action(LocalPortuguese.current)
                 val readReason = AccessibilitySemantics.profilesReadDisabledReason(editorUi, LocalPortuguese.current)
                 IconButton(onClick = { readDialog = true }, enabled = editorUi.canReadFromDevice,
                     modifier = Modifier.semantics {
@@ -310,7 +311,7 @@ import kotlinx.coroutines.withContext
     if (readDialog) ConfirmDialog(tr("Read current settings?", "Ler configurações atuais?"),
         tr("Replace the profile you are editing with the settings on your X10? Save first if you want to keep your edits. The profile name and macro sequences will be kept.",
             "Substituir o perfil em edição pelos ajustes do seu X10? Salve antes se quiser guardar suas alterações. O nome do perfil e as sequências de macro serão mantidos."),
-        tr("Get settings", "Trazer ajustes"), { readDialog = false }) { readDialog = false; model.readController() }
+        ConsumerCopy.readFromX10Action(LocalPortuguese.current), { readDialog = false }) { readDialog = false; model.readController() }
     applySnapshot?.let { snapshot ->
         X10ApplyDialog(snapshot, editorUi.configurationReady,
             dismiss = { applySnapshot = null }, apply = { applySnapshot = null; model.apply(snapshot) })
@@ -478,4 +479,3 @@ import kotlinx.coroutines.withContext
         textStyle = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
     )
 }
-
