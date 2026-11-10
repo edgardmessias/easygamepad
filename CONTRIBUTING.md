@@ -41,8 +41,13 @@ signing secrets are configured on the repository.
 ## Run checks
 
 ```powershell
-.\gradlew.bat :protocol:test :app:lintDebug :app:testDebugUnitTest
+.\gradlew.bat :protocol:test :app:lintDebug :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease
+python -B -m unittest discover -s .github/scripts -p 'test_*.py' -v
+python -B .github/scripts/check_doc_links.py
 ```
+
+GitHub Actions runs the same Gradle targets plus controller-free Compose
+instrumentation on a managed emulator (`:app:connectedDebugAndroidTest`).
 
 For protocol-only work, start with `.\gradlew.bat :protocol:test`.
 Extend codec and session tests when changing packet layouts, response matching

@@ -16,9 +16,9 @@ concurrency:
 
 jobs:
   checks:
-    name: Lint, unit tests and debug build
+    name: Lint, unit tests and app builds
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -34,11 +34,13 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
 
-      - name: Test release tooling
-        run: python3 -B -m unittest discover -s .github/scripts -p 'test_*.py' -v
+      - name: Test release tooling and documentation links
+        run: |
+          python3 -B -m unittest discover -s .github/scripts -p 'test_*.py' -v
+          python3 -B .github/scripts/check_doc_links.py
 
-      - name: Run checks and assemble debug APK
-        run: bash ./gradlew :protocol:test :app:lintDebug :app:testDebugUnitTest :app:assembleDebug --continue --stacktrace
+      - name: Run checks and assemble APKs
+        run: bash ./gradlew :protocol:test :app:lintDebug :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease --stacktrace
 
       - name: Upload lint and test reports
         if: ${{ always() }}
@@ -50,5 +52,41 @@ jobs:
             app/build/test-results/
             protocol/build/reports/
             protocol/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  instrumentation:
+    name: Controller-free Compose UI tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
+
+      - name: Run instrumentation on managed emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          script: bash ./gradlew :app:connectedDebugAndroidTest --stacktrace
+
+      - name: Upload instrumentation reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: instrumentation-reports
+          path: |
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
           if-no-files-found: ignore
           retention-days: 14
