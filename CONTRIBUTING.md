@@ -46,8 +46,10 @@ python -B -m unittest discover -s .github/scripts -p 'test_*.py' -v
 python -B .github/scripts/check_doc_links.py
 ```
 
-GitHub Actions runs the same Gradle targets plus controller-free Compose
-instrumentation on a managed emulator (`:app:connectedDebugAndroidTest`).
+GitHub Actions runs the same Gradle targets on every push and pull request.
+Controller-free Compose instrumentation on a managed emulator
+(`:app:connectedDebugAndroidTest`) runs only when you dispatch the **CI** workflow
+manually on GitHub Actions until emulator stability on Linux runners improves.
 
 For protocol-only work, start with `.\gradlew.bat :protocol:test`.
 Extend codec and session tests when changing packet layouts, response matching

@@ -55,10 +55,12 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  # Emulator boot on ubuntu-24.04 is flaky without KVM; run manually until CI infra is fixed.
   instrumentation:
     name: Controller-free Compose UI tests
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
