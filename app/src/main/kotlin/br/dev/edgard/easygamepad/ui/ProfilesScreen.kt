@@ -3,16 +3,20 @@
 package br.dev.edgard.easygamepad.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -23,13 +27,15 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.semantics.contentDescription
@@ -37,7 +43,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
 import br.dev.edgard.easygamepad.data.EditorSaveBinding
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -65,23 +70,43 @@ import kotlinx.coroutines.withContext
     val link by model.link.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val layout = LocalWindowLayout.current
-    val shortWindow = layout.shortHeight
     val density = LocalDensity.current
-    var bottomBarHeightPx by remember { mutableIntStateOf(0) }
-    val measuredInset = with(density) { bottomBarHeightPx.toDp() }
-    val fallbackInset = profilesEditorBottomInset(shortWindow, density.fontScale)
-    val actionSpace = if (bottomBarHeightPx > 0) measuredInset else fallbackInset
+    val imeVisible = WindowInsets.ime.getBottom(density) > 0
+    val largeText = density.fontScale >= 1.3f
+    val reducedMotion = rememberReducedMotion()
     val section by model.profileSection.collectAsStateWithLifecycle()
     val savedProfileId by model.savedProfileId.collectAsStateWithLifecycle()
     val draftStatus by model.draftStatus.collectAsStateWithLifecycle()
     val canSaveNewCopy = canAddSavedProfile(prefs.profiles)
     val profileScroll = rememberScrollState()
+    var actionsCollapsed by remember { mutableStateOf(false) }
+    val collapseThreshold = with(density) { 28.dp.toPx() }
+    val editorScrollConnection = remember(section, collapseThreshold) {
+        object : NestedScrollConnection {
+            var travel = 0f
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (source != NestedScrollSource.UserInput) return Offset.Zero
+                val delta = consumed.y
+                when {
+                    delta < -1f -> {
+                        travel = minOf(0f, travel) + delta
+                        if (travel <= -collapseThreshold) { actionsCollapsed = true; travel = 0f }
+                    }
+                    delta > 1f -> {
+                        travel = maxOf(0f, travel) + delta
+                        if (travel >= collapseThreshold) { actionsCollapsed = false; travel = 0f }
+                    }
+                }
+                return Offset.Zero
+            }
+        }
+    }
     val sectionLabels = listOf(tr("Buttons", "Botões"), tr("Sticks", "Analógicos"), tr("Triggers", "Gatilhos"), tr("Macros", "Macros"), tr("Turbo", "Turbo"), tr("Vibration", "Vibração"))
     DisposableEffect(Unit) { onDispose { model.cancelX10VibrationPreview() } }
-    LaunchedEffect(section) { profileScroll.scrollTo(0) }
+    LaunchedEffect(section) { profileScroll.scrollTo(0); actionsCollapsed = false }
     var savedVisible by rememberSaveable { mutableStateOf(false) }
     var editingName by rememberSaveable { mutableStateOf(false) }
+    var menuVisible by remember { mutableStateOf(false) }
     var rear by rememberSaveable { mutableStateOf(false) }
     var showAllButtons by rememberSaveable { mutableStateOf(false) }
     var keyPicker by remember { mutableStateOf<PadKey?>(null) }
@@ -93,6 +118,18 @@ import kotlinx.coroutines.withContext
     val validationIssues = remember(draft) { draft.profileValidationIssues() }
     val draftValid = validationIssues.isEmpty()
     val editorUi = profilesEditorUiState(link.phase, hardware.busy, hardware.calibration, draftValid)
+    val canSaveCurrent = editorUi.canSaveProfile && (savedProfileId != null || canSaveNewCopy)
+    val saveCurrent: () -> Unit = { if (savedProfileId != null) model.updateSavedCopy() else model.saveAsNewCopy() }
+    val draftStatusLabel = when (draftStatus) {
+        DraftStatusKind.UNSAVED_CHANGES -> tr("Unsaved changes", "Alterações não salvas")
+        DraftStatusKind.NEW -> tr("New draft", "Rascunho novo")
+        DraftStatusKind.EDITING_SAVED -> tr("Saved copy", "Cópia salva")
+        DraftStatusKind.CLEAN -> tr("Ready to edit", "Pronto para editar")
+    }
+    val moreActionsLabel = tr("More profile actions", "Mais ações do perfil")
+    val savedProfilesLabel = ConsumerCopy.savedProfileQuota(prefs.profiles.size, portuguese = LocalPortuguese.current)
+    val editNameLabel = tr("Edit profile name: ", "Editar nome do perfil: ") + draft.name
+    BackHandler(savedVisible) { savedVisible = false }
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         val snapshot = exportSnapshot
         if (uri != null && snapshot != null) scope.launch {
@@ -115,66 +152,85 @@ import kotlinx.coroutines.withContext
                 .onFailure { model.repository.notice("Could not read this profile file", "Não foi possível ler este arquivo de perfil", true) }
         }
     }
-    Box(Modifier.fillMaxSize()) {
-    ScreenColumn(Modifier.padding(bottom = actionSpace), scrollState = profileScroll) {
-        ScreenHeading(tr("Your setup", "Seus ajustes"), tr("Make it yours.", "Do seu jeito."))
-        SectionTitle(ConsumerCopy.savedProfileQuota(prefs.profiles.size, portuguese = LocalPortuguese.current),
-            if (savedVisible) tr("Hide", "Ocultar") else tr("Open", "Abrir")) { savedVisible = !savedVisible }
-        if (savedVisible) {
-            if (prefs.profiles.isEmpty()) Description(tr("No saved copies yet. Save your draft to keep it on this phone.", "Nenhuma cópia salva ainda. Salve seu rascunho para guardá-lo neste celular."))
-            else Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                prefs.profiles.forEach { profile ->
-                    val selected = profile.id == savedProfileId
-                    Surface(shape = RoundedCornerShape(18.dp), color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-                        border = BorderStroke(1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant)) {
-                        Column(Modifier.width(176.dp).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            HubIcon(Glyph.PROFILES, color = MaterialTheme.colorScheme.secondary)
-                            Text(profile.config.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(if (selected) tr("Editing this copy", "Editando esta cópia") else tr("Saved on this phone", "Salvo neste celular"),
-                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Row {
-                                TextButton(onClick = { loadDialog = profile }, modifier = Modifier.weight(1f)) { Text(tr("Load", "Carregar")) }
-                                val deleteLabel = tr("Delete profile", "Excluir perfil")
-                                IconButton(onClick = { deleteDialog = profile.id }, modifier = Modifier.semantics { contentDescription = deleteLabel }) {
-                                    HubIcon(Glyph.TRASH, Modifier.size(18.dp))
-                                }
-                            }
-                        }
+    if (savedVisible) {
+        SavedProfilesScreen(prefs.profiles, savedProfileId, { savedVisible = false },
+            onLoad = { loadDialog = it }, onDelete = { deleteDialog = it.id })
+    } else {
+        Column(Modifier.fillMaxSize().imePadding()) {
+            Row(Modifier.fillMaxWidth().padding(start = ScreenLayout.horizontalPadding, end = 8.dp, top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { editingName = !editingName }, modifier = Modifier.weight(1f).heightIn(min = 48.dp).semantics {
+                    contentDescription = editNameLabel
+                    stateDescription = draftStatusLabel
+                },
+                    contentPadding = PaddingValues(horizontal = 0.dp)) {
+                    HubIcon(Glyph.EDIT, Modifier.size(17.dp), MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text(draft.name, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(draftStatusLabel, style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                TextButton(onClick = { savedVisible = true }, modifier = Modifier.heightIn(min = 48.dp).semantics {
+                    contentDescription = savedProfilesLabel
+                },
+                    contentPadding = PaddingValues(horizontal = 8.dp)) {
+                    HubIcon(Glyph.PROFILES, Modifier.size(18.dp), MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(if (largeText) 4.dp else 6.dp))
+                    Text((if (largeText) "" else tr("Saved ", "Salvos ")) + prefs.profiles.size, maxLines = 1)
+                }
+                Box {
+                    IconButton(onClick = { menuVisible = true }, modifier = Modifier.semantics {
+                        contentDescription = moreActionsLabel
+                    }) { Text("⋮", style = MaterialTheme.typography.titleLarge) }
+                    DropdownMenu(expanded = menuVisible, onDismissRequest = { menuVisible = false }) {
+                        DropdownMenuItem(text = { Text(if (savedProfileId != null) ConsumerCopy.updateSavedCopyAction(LocalPortuguese.current)
+                            else ConsumerCopy.saveProfileAction(LocalPortuguese.current)) },
+                            enabled = canSaveCurrent, onClick = { menuVisible = false; saveCurrent() })
+                        DropdownMenuItem(text = { Text(ConsumerCopy.applyToX10Action(LocalPortuguese.current)) },
+                            enabled = editorUi.canApplyToDevice, onClick = { menuVisible = false; applySnapshot = draft })
+                        HorizontalDivider()
+                        if (savedProfileId != null) DropdownMenuItem(
+                            text = { Text(tr("Save as new", "Salvar como novo")) },
+                            enabled = editorUi.canSaveProfile && canSaveNewCopy,
+                            onClick = { menuVisible = false; model.saveAsNewCopy() },
+                        )
+                        DropdownMenuItem(text = { Text(ConsumerCopy.readFromX10Action(LocalPortuguese.current)) },
+                            enabled = editorUi.canReadFromDevice, onClick = { menuVisible = false; readDialog = true })
+                        DropdownMenuItem(text = { Text(tr("Import profile from a file", "Importar perfil de um arquivo")) },
+                            onClick = { menuVisible = false; import.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) })
+                        DropdownMenuItem(text = { Text(tr("Export profile", "Exportar perfil")) },
+                            enabled = editorUi.canSaveProfile,
+                            onClick = { menuVisible = false; exportSnapshot = draft; export.launch("easygamepad-profile.json") })
                     }
                 }
             }
-        }
-        HubCard(Modifier.fillMaxWidth()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { editingName = !editingName }, modifier = Modifier.weight(1f)) {
-                    HubIcon(Glyph.EDIT, Modifier.size(16.dp), MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(8.dp))
-                    Text(draft.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = CircleShape) {
-                    Text(tr("Editing", "Em edição"), Modifier.padding(horizontal = 10.dp, vertical = 6.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
-                }
-                val readLabel = ConsumerCopy.readFromX10Action(LocalPortuguese.current)
-                val readReason = AccessibilitySemantics.profilesReadDisabledReason(editorUi, LocalPortuguese.current)
-                IconButton(onClick = { readDialog = true }, enabled = editorUi.canReadFromDevice,
-                    modifier = Modifier.semantics {
-                        contentDescription = readLabel
-                        readReason?.let { stateDescription = it }
-                    },
-                ) {
-                    HubIcon(Glyph.DOWNLOAD, color = MaterialTheme.colorScheme.primary)
+            if (editingName) OutlinedTextField(draft.name, { name -> model.edit { it.copy(name = name.take(40)) } },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = ScreenLayout.horizontalPadding),
+                label = { Text(tr("Profile name", "Nome do perfil")) }, singleLine = true,
+                isError = validationIssues.any { it.field == ProfileField.NAME },
+                supportingText = validationIssues.firstOrNull { it.field == ProfileField.NAME }?.localizedMessage()?.let { { Text(it) } })
+            if (hardware.busy) LinearProgressIndicator(progress = { hardware.progress }, modifier = Modifier.fillMaxWidth())
+            Row(Modifier.fillMaxWidth().padding(horizontal = ScreenLayout.horizontalPadding),
+                verticalAlignment = Alignment.CenterVertically) {
+                ProfileEditorSectionNav(sectionLabels, section, { model.profileSection.value = it }, Modifier.weight(1f))
+                if (link.phase != LinkPhase.READY) {
+                    val connectLabel = tr("Connect to apply", "Conectar para aplicar")
+                    TextButton(onClick = model::connectSelected, modifier = Modifier.heightIn(min = 48.dp).semantics {
+                        contentDescription = connectLabel
+                    }, contentPadding = PaddingValues(horizontal = 4.dp)) {
+                        Text(tr("Connect", "Conectar"))
+                    }
                 }
             }
-            if (editingName) OutlinedTextField(draft.name, { name -> model.edit { it.copy(name = name.take(40)) } }, modifier = Modifier.fillMaxWidth(), label = { Text(tr("Profile name", "Nome do perfil")) }, singleLine = true,
-                isError = validationIssues.any { it.field == br.dev.edgard.easygamepad.protocol.ProfileField.NAME },
-                supportingText = validationIssues.firstOrNull { it.field == br.dev.edgard.easygamepad.protocol.ProfileField.NAME }?.localizedMessage()?.let { { Text(it) } })
-            ProfileValidationBanner(if (editingName) validationIssues.filter { it.field != br.dev.edgard.easygamepad.protocol.ProfileField.NAME } else validationIssues)
-            hardware.settingsReadAt?.let { Description(tr("Last read from controller: ", "Última leitura do controle: ") + timeLabel(it)) }
-        }
-        ProfileEditorSectionNav(sectionLabels, section, { model.profileSection.value = it })
+            Box(Modifier.weight(1f).nestedScroll(editorScrollConnection)) {
+            ScreenColumn(scrollState = profileScroll) {
+                ProfileValidationBanner(if (editingName) validationIssues.filter { it.field != ProfileField.NAME } else validationIssues)
+                hardware.settingsReadAt?.let { Description(tr("Last read from controller: ", "Última leitura do controle: ") + timeLabel(it)) }
         when (section) {
             0 -> {
-                HubCard(Modifier.fillMaxWidth()) {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Eyebrow(tr("Tap to edit", "Toque para editar"), color = MaterialTheme.colorScheme.primary)
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -191,8 +247,9 @@ import kotlinx.coroutines.withContext
                         }
                     }
                     ControllerStage(Modifier.fillMaxWidth().then(if (LocalWindowLayout.current.shortHeight) Modifier.height(220.dp) else Modifier.aspectRatio(1.65f)), artwork = ControllerArtworkCatalog.X10, rear = rear, mappings = draft.mappings, onPick = { keyPicker = it })
-                    Description(tr("Tap a button to choose its function. Highlights show your custom assignments.",
-                        "Toque em um botão para escolher sua função. Os destaques mostram suas alterações."))
+                    ProfileHelp(tr("How button mapping works", "Como funcionam os botões"),
+                        tr("Tap a button to choose its function. Highlights show your custom assignments.",
+                            "Toque em um botão para escolher sua função. Os destaques mostram suas alterações."))
                 }
                 TextButton(onClick = { showAllButtons = !showAllButtons }) {
                     Text(if (showAllButtons) tr("Hide button list", "Ocultar lista de botões") else tr("Show button list", "Ver lista de botões"))
@@ -222,23 +279,28 @@ import kotlinx.coroutines.withContext
                 }
                 }
                 TextButton(onClick = { model.edit { it.copy(mappings = it.mappings + PadKey.outputs.associateWith { key -> key }) } }) { Text(tr("Restore default button functions", "Restaurar funções originais dos botões")) }
-                Description(tr("An unlisted assignment is not sent and does not request deletion. Existing assignments may remain on the X10. Restoring a standard button sends its own output explicitly.", "Uma atribuição ausente não é enviada e não solicita exclusão. As atribuições existentes podem permanecer no X10. Restaurar um botão padrão envia sua própria função explicitamente."))
+                ProfileHelp(tr("About missing assignments", "Sobre atribuições ausentes"),
+                    tr("An unlisted assignment is not sent and does not request deletion. Existing assignments may remain on the X10. Restoring a standard button sends its own output explicitly.",
+                        "Uma atribuição ausente não é enviada e não solicita exclusão. As atribuições existentes podem permanecer no X10. Restaurar um botão padrão envia sua própria função explicitamente."))
             }
             1 -> {
-                Description(tr("Reduce unwanted movement near the center or choose how far you move the stick to reach full speed.", "Reduza movimentos involuntários perto do centro ou escolha quanto mover o analógico para atingir a velocidade máxima."))
                 StickEditor(tr("Left stick", "Analógico esquerdo"), draft.leftStick) { value -> model.edit { it.copy(leftStick = value) } }
                 StickEditor(tr("Right stick", "Analógico direito"), draft.rightStick) { value -> model.edit { it.copy(rightStick = value) } }
+                ProfileHelp(tr("About stick response", "Sobre a resposta dos analógicos"),
+                    tr("Reduce unwanted movement near the center or choose how far you move the stick to reach full speed.",
+                        "Reduza movimentos involuntários perto do centro ou escolha quanto mover o analógico para atingir a velocidade máxima."))
             }
             2 -> {
-                Description(tr("Choose where each trigger begins responding and reaches full output.", "Escolha onde cada gatilho começa a responder e atinge o valor máximo."))
                 HubCard(Modifier.fillMaxWidth()) { Text("LT", style = MaterialTheme.typography.titleLarge); RangeEditor(draft.leftTrigger.min, draft.leftTrigger.max) { min, max -> model.edit { it.copy(leftTrigger = TriggerSettings(min, max)) } } }
                 HubCard(Modifier.fillMaxWidth()) { Text("RT", style = MaterialTheme.typography.titleLarge); RangeEditor(draft.rightTrigger.min, draft.rightTrigger.max) { min, max -> model.edit { it.copy(rightTrigger = TriggerSettings(min, max)) } } }
+                ProfileHelp(tr("About trigger response", "Sobre a resposta dos gatilhos"),
+                    tr("Choose where each trigger begins responding and reaches full output.",
+                        "Escolha onde cada gatilho começa a responder e atinge o valor máximo."))
             }
             3 -> MacroEditor(draft.macros) { value -> model.edit { it.copy(macros = value) } }
             4 -> TurboEditor(draft.turbos) { value -> model.edit { it.copy(turbos = value) } }
             else -> HubCard(Modifier.fillMaxWidth()) {
                 Text(tr("Feel every moment.", "Sinta cada momento."), style = MaterialTheme.typography.titleLarge)
-                Description(tr("Set the intensity of each controller motor. Availability depends on the controller's operating mode.", "Ajuste a intensidade de cada motor do controle. A disponibilidade depende do modo de operação."))
                 ValueSlider(tr("Left motor", "Motor esquerdo"), draft.leftVibration, 0..100, "%",
                     previewing = x10VibrationPreview.busy(X10Motor.LEFT),
                     exactInput = true,
@@ -251,14 +313,18 @@ import kotlinx.coroutines.withContext
                     onChange = { value -> model.edit { it.copy(rightVibration = value) } },
                     onSliderChange = model::setRightVibration,
                     onChangeFinished = model::finishRightVibrationPreview)
-                Description(tr("While the X10 configuration channel is ready, hold and drag a slider to feel that motor at the chosen intensity. Release the slider to stop. Nothing is saved until you apply the profile. If vibration continues after release, turn the controller off.",
-                    "Com o canal de configuração do X10 pronto, mantenha e arraste um controle para sentir aquele motor na intensidade escolhida. Solte para parar. Nada é gravado até você aplicar o perfil. Se continuar vibrando após soltar, desligue o controle."))
+                ProfileHelp(tr("About motor intensity", "Sobre a intensidade dos motores"),
+                    tr("Set the intensity of each controller motor. Availability depends on the controller's operating mode.",
+                        "Ajuste a intensidade de cada motor do controle. A disponibilidade depende do modo de operação."))
+                ProfileHelp(tr("Previewing vibration", "Prévia da vibração"),
+                    tr("While the X10 configuration channel is ready, hold and drag a slider to feel that motor at the chosen intensity. Release the slider to stop. Nothing is saved until you apply the profile. If vibration continues after release, turn the controller off.",
+                        "Com o canal de configuração do X10 pronto, mantenha e arraste um controle para sentir aquele motor na intensidade escolhida. Solte para parar. Nada é gravado até você aplicar o perfil. Se continuar vibrando após soltar, desligue o controle."))
                 if (!canTestX10Vibration) Description(tr("Connect the X10 configuration channel and finish any active operation to preview motor intensity on the controller.",
                     "Conecte o canal de configuração do X10 e conclua qualquer operação em andamento para pré-visualizar a intensidade dos motores no controle."))
                 OutlinedButton(onClick = model::rumble, enabled = vibrationTestAvailability == GamepadVibrationAvailability.AVAILABLE) {
                     Text(tr("Test Android gamepad vibration", "Testar vibração do controle no Android"))
                 }
-                Description(when (vibrationTestAvailability) {
+                ProfileHelp(tr("About the Android vibration test", "Sobre o teste de vibração no Android"), when (vibrationTestAvailability) {
                     GamepadVibrationAvailability.NO_DEVICE -> tr(
                         "Connect and select the gameplay controller to test vibration. The app configuration connection alone is not enough.",
                         "Conecte e selecione o controle para jogar antes de testar a vibração. Apenas a conexão de configuração com o app não é suficiente.")
@@ -271,37 +337,32 @@ import kotlinx.coroutines.withContext
                 })
             }
         }
-        if (hardware.busy) LinearProgressIndicator(progress = { hardware.progress }, modifier = Modifier.fillMaxWidth())
-        if (link.phase != LinkPhase.READY) TextButton(onClick = model::connectSelected, modifier = Modifier.fillMaxWidth()) { Text(tr("Connect your controller to apply", "Conecte o controle para aplicar")) }
-        OutlinedButton(onClick = { exportSnapshot = draft; export.launch("easygamepad-profile.json") }, enabled = editorUi.canSaveProfile, modifier = Modifier.fillMaxWidth()) { Text(tr("Export profile", "Exportar perfil")) }
-        TextButton(onClick = { import.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }, modifier = Modifier.fillMaxWidth()) { Text(tr("Import profile from a file", "Importar perfil de um arquivo")) }
         hardware.applyResult?.let { result ->
             X10ApplyOutcomeCard(
                 hardware.lastAppliedSnapshot, result, hardware.appliedAt, hardware.settingsReadAt,
                 onReadFromDevice = { readDialog = true },
             )
         }
-    }
-    val statusHint = when (draftStatus) {
-        DraftStatusKind.UNSAVED_CHANGES -> tr("Unsaved changes. Save or update your copy before loading another profile.", "Alterações não salvas. Salve ou atualize sua cópia antes de carregar outro perfil.")
-        DraftStatusKind.NEW -> tr("New draft with unsaved edits. Applying sends to the controller; saving keeps a copy on this phone.", "Rascunho novo com alterações não salvas. Aplicar envia ao controle; salvar guarda uma cópia neste celular.")
-        DraftStatusKind.EDITING_SAVED -> tr("Matches the saved copy you loaded. Apply sends changes to the controller.", "Igual à cópia salva carregada. Aplicar envia as mudanças ao controle.")
-        DraftStatusKind.CLEAN -> tr("Edits reach your controller when you apply.", "Os ajustes só mudam no controle ao aplicar.")
-    }
-    ProfileEditorBottomBar(
-        if (!draftValid) profileSaveBlockedReason(validationIssues) ?: statusHint else statusHint,
-        showHint = !shortWindow || !draftValid || draftStatus != DraftStatusKind.CLEAN,
-        editingSavedCopy = savedProfileId != null,
-        canSave = editorUi.canSaveProfile,
-        canApply = editorUi.canApplyToDevice,
-        canSaveNewCopy = canSaveNewCopy,
-        onUpdateSaved = model::updateSavedCopy,
-        onSaveAsNew = model::saveAsNewCopy,
-        onSaveNew = model::saveAsNewCopy,
-        onApply = { applySnapshot = draft },
-        modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding(),
-        onMeasuredHeightPx = { bottomBarHeightPx = it },
-    )
+            }
+            }
+            AnimatedVisibility(
+                visible = !imeVisible && !actionsCollapsed,
+                enter = if (reducedMotion) EnterTransition.None else expandVertically(),
+                exit = if (reducedMotion) ExitTransition.None else shrinkVertically(),
+            ) { ProfileEditorBottomBar(
+                editingSavedCopy = savedProfileId != null,
+                canSave = canSaveCurrent,
+                canApply = editorUi.canApplyToDevice,
+                saveDisabledReason = when {
+                    !editorUi.canSaveProfile -> AccessibilitySemantics.profilesSaveDisabledReason(editorUi, LocalPortuguese.current)
+                    savedProfileId == null && !canSaveNewCopy -> tr("Delete a saved profile to make room.", "Exclua um perfil salvo para liberar espaço.")
+                    else -> null
+                },
+                applyDisabledReason = AccessibilitySemantics.profilesApplyDisabledReason(editorUi, LocalPortuguese.current),
+                onSave = saveCurrent,
+                onApply = { applySnapshot = draft },
+            ) }
+        }
     }
     keyPicker?.let { source -> KeyPicker(tr("Output for ", "Função para ") + source.label, PadKey.outputs, onDismiss = { keyPicker = null },
         clearLabel = if (source in PadKey.outputs) tr("Restore standard output", "Restaurar função padrão") else tr("Do not send assignment", "Não enviar atribuição"),
@@ -318,7 +379,7 @@ import kotlinx.coroutines.withContext
     }
     loadDialog?.let { saved ->
         ConfirmDialog(tr("Load profile?", "Carregar perfil?"), tr("This replaces the profile you are editing. Save first if you want to keep your changes.", "Isso substitui o perfil em edição. Salve antes se quiser guardar suas alterações."), tr("Load", "Carregar"), { loadDialog = null }) {
-            model.loadSaved(saved); loadDialog = null
+            model.loadSaved(saved); loadDialog = null; savedVisible = false
         }
     }
     deleteDialog?.let { id -> ConfirmDialog(tr("Delete saved profile?", "Excluir perfil salvo?"), tr("The saved copy will be removed from this phone.", "A cópia salva será removida deste celular."), tr("Delete", "Excluir"), { deleteDialog = null }) { model.delete(id); deleteDialog = null } }
@@ -327,6 +388,23 @@ import kotlinx.coroutines.withContext
 @Composable fun ConfirmDialog(title: String, body: String, action: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
     AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = { Text(body) },
         confirmButton = { TextButton(onClick = onConfirm) { Text(action) } }, dismissButton = { TextButton(onClick = onDismiss) { Text(tr("Cancel", "Cancelar")) } })
+}
+
+@Composable fun ProfileHelp(title: String, body: String) {
+    var expanded by rememberSaveable(title) { mutableStateOf(false) }
+    val expandedLabel = tr("Expanded", "Expandido")
+    val collapsedLabel = tr("Collapsed", "Recolhido")
+    Column {
+        TextButton(onClick = { expanded = !expanded }, modifier = Modifier.heightIn(min = 48.dp).semantics {
+            stateDescription = if (expanded) expandedLabel else collapsedLabel
+        },
+            contentPadding = PaddingValues(horizontal = 4.dp)) {
+            HubIcon(Glyph.INFO, Modifier.size(17.dp), MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(8.dp))
+            Text(title)
+        }
+        if (expanded) Description(body)
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)

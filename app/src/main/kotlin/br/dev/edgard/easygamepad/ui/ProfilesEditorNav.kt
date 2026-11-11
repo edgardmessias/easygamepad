@@ -2,38 +2,27 @@
 // Copyright (C) 2026 Edgard
 package br.dev.edgard.easygamepad.ui
 
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.*
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
-import kotlinx.coroutines.launch
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 const val PROFILE_EDITOR_SECTION_COUNT = 6
-
-/** Reserve space for the pinned Save/Apply bar; scales with font and short landscape windows. */
-fun profilesEditorBottomInset(shortHeight: Boolean, fontScale: Float): Dp {
-    val bar = when {
-        fontScale >= 1.5f -> 168.dp
-        fontScale >= 1.3f -> 144.dp
-        shortHeight -> 112.dp
-        else -> 128.dp
-    }
-    return bar
-}
 
 @Composable
 fun ProfileEditorSectionNav(
@@ -43,33 +32,44 @@ fun ProfileEditorSectionNav(
     modifier: Modifier = Modifier,
 ) {
     val labels = sectionLabels.take(PROFILE_EDITOR_SECTION_COUNT)
-    val active = labels.getOrElse(selectedIndex.coerceIn(0, labels.lastIndex.coerceAtLeast(0))) { labels.first() }
-    val chipScroll = rememberScrollState()
-    val bringRequesters = remember(labels.size) { List(labels.size) { BringIntoViewRequester() } }
-    val scope = rememberCoroutineScope()
-    LaunchedEffect(selectedIndex) {
-        bringRequesters.getOrNull(selectedIndex)?.let { requester ->
-            scope.launch { requester.bringIntoView() }
+    if (labels.isEmpty()) return
+    val current = selectedIndex.coerceIn(labels.indices)
+    var menuVisible by remember { mutableStateOf(false) }
+    val previousLabel = tr("Previous section", "Seção anterior")
+    val nextLabel = tr("Next section", "Próxima seção")
+    val chooseLabel = tr("Choose section: ", "Escolher seção: ") + labels[current] + ", ${current + 1}/${labels.size}"
+
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = { onSelect(current - 1) }, enabled = current > 0,
+            modifier = Modifier.semantics { contentDescription = previousLabel }) {
+            HubIcon(Glyph.ARROW, Modifier.size(20.dp).rotate(180f),
+                if (current > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f))
         }
-    }
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(tr("Section", "Seção"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(active, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        }
-        Row(Modifier.horizontalScroll(chipScroll), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            labels.forEachIndexed { index, label ->
-                val selected = index == selectedIndex
-                val currentPrefix = tr("Current section: ", "Seção atual: ")
-                FilterChip(
-                    selected = selected,
-                    onClick = { onSelect(index) },
-                    label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    modifier = Modifier
-                        .bringIntoViewRequester(bringRequesters[index])
-                        .then(if (selected) Modifier.semantics { contentDescription = currentPrefix + label } else Modifier),
-                )
+        Box(Modifier.weight(1f)) {
+            TextButton(onClick = { menuVisible = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).semantics {
+                contentDescription = chooseLabel
+            }, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                Text(labels[current], modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.titleSmall)
+                Text("${current + 1}/${labels.size}", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.width(4.dp))
+                HubIcon(Glyph.ARROW, Modifier.size(14.dp).rotate(90f), MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            DropdownMenu(expanded = menuVisible, onDismissRequest = { menuVisible = false }) {
+                labels.forEachIndexed { index, label ->
+                    DropdownMenuItem(
+                        text = { Text(label) },
+                        trailingIcon = if (index == current) ({ HubIcon(Glyph.CHECK, Modifier.size(18.dp), MaterialTheme.colorScheme.primary) }) else null,
+                        onClick = { menuVisible = false; onSelect(index) },
+                    )
+                }
+            }
+        }
+        IconButton(onClick = { onSelect(current + 1) }, enabled = current < labels.lastIndex,
+            modifier = Modifier.semantics { contentDescription = nextLabel }) {
+            HubIcon(Glyph.ARROW, Modifier.size(20.dp),
+                if (current < labels.lastIndex) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = .38f))
         }
     }
 }

@@ -17,12 +17,6 @@ import br.dev.edgard.easygamepad.protocol.*
 fun MacroEditor(macros: List<Macro>, change: (List<Macro>) -> Unit) {
     var picker by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Description(
-            tr(
-                "Build a sequence for a rear paddle. Each step presses a button, holds it, then waits. Up to 32 steps per paddle.",
-                "Crie uma sequência para um botão traseiro. Cada etapa pressiona um botão, segura e espera. Até 32 etapas por botão.",
-            ),
-        )
         if (macros.isEmpty()) {
             InfoBanner(tr("Start with a simple sequence, like A → B, assigned to M1.", "Comece com uma sequência simples, como A → B, atribuída ao M1."))
         }
@@ -66,12 +60,6 @@ fun MacroEditor(macros: List<Macro>, change: (List<Macro>) -> Unit) {
                 ) { Text(tr("Add step", "Adicionar etapa")) }
             }
         }
-        Description(
-            tr(
-                "Removing a macro from the profile omits its upload. That is not a delete command on the controller.",
-                "Remover uma macro do perfil omite o envio. Isso não é um comando de exclusão no controle.",
-            ),
-        )
         val available = listOf(PadKey.M1, PadKey.M2).filter { key -> macros.none { it.trigger == key } }
         if (available.isNotEmpty()) {
             Eyebrow(tr("Add a paddle sequence", "Adicionar sequência traseira"))
@@ -83,6 +71,20 @@ fun MacroEditor(macros: List<Macro>, change: (List<Macro>) -> Unit) {
                 }
             }
         }
+        ProfileHelp(
+            tr("How macros work", "Como funcionam as macros"),
+            tr(
+                "Build a sequence for a rear paddle. Each step presses a button, holds it, then waits. Up to 32 steps per paddle.",
+                "Crie uma sequência para um botão traseiro. Cada etapa pressiona um botão, segura e espera. Até 32 etapas por botão.",
+            ),
+        )
+        ProfileHelp(
+            tr("Removing macros", "Remover macros"),
+            tr(
+                "Removing a macro from the profile omits its upload. That is not a delete command on the controller.",
+                "Remover uma macro do perfil omite o envio. Isso não é um comando de exclusão no controle.",
+            ),
+        )
     }
     picker?.let { (macroIndex, stepIndex) ->
         KeyPicker(tr("Step button", "Botão da etapa"), PadKey.outputs, { picker = null }) { key ->
@@ -162,12 +164,6 @@ private fun MacroNumberField(label: String, value: Int, range: IntRange, modifie
 fun TurboEditor(turbos: List<Turbo>, change: (List<Turbo>) -> Unit) {
     var picker by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Description(
-            tr(
-                "Turbo repeats a face button using the rate value stored on the X10 (1–20). It is the same number sent in KRLY command 55, not a measured presses-per-second value.",
-                "O turbo repete um botão frontal com o valor de taxa gravado no X10 (1–20). É o mesmo número enviado no comando KRLY 55, não uma medição de pressionamentos por segundo.",
-            ),
-        )
         turbos.forEachIndexed { index, turbo ->
             fun update(value: Turbo) = change(turbos.toMutableList().also { it[index] = value })
             HubCard(Modifier.fillMaxWidth()) {
@@ -190,6 +186,13 @@ fun TurboEditor(turbos: List<Turbo>, change: (List<Turbo>) -> Unit) {
         OutlinedButton(onClick = { picker = true }, enabled = turbos.size < PadKey.outputs.size, modifier = Modifier.fillMaxWidth()) {
             Text(tr("Add turbo button", "Adicionar botão turbo"))
         }
+        ProfileHelp(
+            tr("How turbo works", "Como funciona o turbo"),
+            tr(
+                "Turbo repeats a face button using the rate value stored on the X10 (1–20). It is the same number sent in KRLY command 55, not a measured presses-per-second value.",
+                "O turbo repete um botão frontal com o valor de taxa gravado no X10 (1–20). É o mesmo número enviado no comando KRLY 55, não uma medição de pressionamentos por segundo.",
+            ),
+        )
         Description(
             tr(
                 "Removing turbo here may leave the previous turbo setting on your controller. Get the settings from X10 after applying to check.",
