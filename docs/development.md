@@ -80,9 +80,12 @@ Only a matching ready configuration address may receive feature operations.
 Battery state is scoped to the selected device; an absent reading is not zero.
 
 Foreground reconnection uses the saved, verified configuration address and
-backoff. Leaving the foreground attempts cleanup and disconnects BLE. A manual
-disconnect pauses retries until the next foreground entry. Scanning failures are
-reported independently of an already-ready connection.
+backoff when the configuration link is `DISCONNECTED`. A ready idle KRLY session
+survives a normal background transition (for example app switch); active
+calibration or macro upload triggers cleanup and disconnect on background.
+`HubViewModel.onCleared` disconnects the application-scoped repository when the
+UI scope ends. A manual disconnect pauses retries until the next foreground entry.
+Scanning failures are reported independently of an already-ready connection.
 
 ### Capabilities and additional controllers
 

@@ -94,23 +94,69 @@ class BleClient(private val context: Context, private val scope: CoroutineScope)
         check(locationEnabled()) { "Turn on Location to scan on Android 8–11" }
         stopScan()
         mutableScanFailure.value = null
-        mutableDevices.value = adapter?.bondedDevices.orEmpty().filter { it.type != BluetoothDevice.DEVICE_TYPE_CLASSIC }.map { device ->
-            FoundDevice(device.address, device.name ?: device.address, bonded = true, candidate = candidate(device.name))
-        }
+        mutableDevices.value = seedScanDevices()
         mutableScanning.value = true
         try {
-            adapter?.bluetoothLeScanner?.startScan(null, ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), scanCallback)
+            adapter?.bluetoothLeScanner?.startScan(null, aggressiveScanSettings(), scanCallback)
         } catch (error: Exception) { mutableScanning.value = false; throw error }
         scanJob = scope.launch { delay(12000); stopScan() }
     }
-    private fun candidate(name: String?) = listOf("x10", "x20", "easysmx", "qmacro", "keylinker", "xbox", "smx").any { name?.contains(it, true) == true }
+
+    /** Same as [BleDiscovery.configurationChannelName]; Xbox gameplay names stay visible but not highlighted. */
+    private fun candidate(name: String?) = BleDiscovery.configurationChannelName(name)
+
+    private fun aggressiveScanSettings(): ScanSettings {
+        val builder = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            builder.setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            builder.setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
+                .setNumOfMatches(ScanSettings.MATCH_NUM_MAX_ADVERTISEMENT)
+        }
+        return builder.build()
+    }
+
+    /**
+     * Seeds the connection sheet before passive scan callbacks. The official inuker library
+     * (`notifyConnectedBluetoothLeDevices`) only injects already GATT-connected LE devices;
+     * bonded non-classic rows are EasyGamepad behavior so saved controllers appear immediately.
+     * Seed rows must not touch [observed] — only real scan advertisements refresh connect resolution.
+     */
+    private fun seedScanDevices(): List<FoundDevice> {
+        val merged = linkedMapOf<String, FoundDevice>()
+        fun absorb(address: String, name: String?, rssi: Int?, bonded: Boolean) {
+            val item = FoundDevice(address, name?.takeIf { it.isNotBlank() } ?: address, rssi, bonded, candidate(name))
+            merged[address] = mergeFoundDevice(merged[address], item)
+        }
+        adapter?.bondedDevices.orEmpty()
+            .filter { it.type != BluetoothDevice.DEVICE_TYPE_CLASSIC }
+            .forEach { device -> absorb(device.address, device.name, null, bonded = true) }
+        if (hasPermissions()) {
+            val manager = context.getSystemService(BluetoothManager::class.java)
+            manager?.getConnectedDevices(BluetoothProfile.GATT).orEmpty()
+                .filter { it.type != BluetoothDevice.DEVICE_TYPE_CLASSIC }
+                .forEach { device ->
+                    absorb(device.address, device.name, null, bonded = device.bondState == BluetoothDevice.BOND_BONDED)
+                }
+        }
+        return merged.values.sortedWith(deviceSort).take(100)
+    }
+
+    private val deviceSort = compareByDescending<FoundDevice> { it.candidate }
+        .thenByDescending { BleDiscovery.configurationNamePriority(it.name) }
+        .thenByDescending { it.bonded }
+        .thenByDescending { it.rssi ?: -127 }
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             observed[result.device.address] = result.device to android.os.SystemClock.elapsedRealtime()
             val name = result.scanRecord?.deviceName ?: result.device.name ?: "Bluetooth LE"
             val item = FoundDevice(result.device.address, name, result.rssi, result.device.bondState == BluetoothDevice.BOND_BONDED, candidate(name))
-            mutableDevices.update { old -> (old.filterNot { it.address == item.address } + item)
-                .sortedWith(compareByDescending<FoundDevice> { it.candidate }.thenByDescending { it.bonded }.thenByDescending { it.rssi ?: -127 }).take(100) }
+            if (BuildConfig.DEBUG && (item.candidate || BleDiscovery.advertisesKrlyService(result.scanRecord))) {
+                val services = result.scanRecord?.serviceUuids?.joinToString { it.uuid.toString() } ?: "none"
+                log("SCAN", "Advertisement $name · ${result.device.address} · services=$services · ${result.rssi} dBm")
+            }
+            mutableDevices.update { old -> (old.filterNot { it.address == item.address } + item).sortedWith(deviceSort).take(100) }
         }
         override fun onScanFailed(errorCode: Int) {
             mutableScanning.value = false
@@ -138,9 +184,7 @@ class BleClient(private val context: Context, private val scope: CoroutineScope)
         log("LINK", "Looking for configuration channel $address")
         discoveryJob = scope.launch {
             try {
-                val recent = observed[address]?.takeIf { android.os.SystemClock.elapsedRealtime() - it.second < 30_000 }?.first
-                val discovered = recent ?: discoverConfiguration(address)
-                val device = discovered ?: requireNotNull(adapter).getRemoteDevice(address)
+                val device = resolveConnectDevice(address)
                 ensureActive()
                 mutableLink.update { it.copy(name = device.name ?: displayName) }
                 log("LINK", "Connecting to $address · ${device.name} · type ${device.type}")
@@ -149,6 +193,26 @@ class BleClient(private val context: Context, private val scope: CoroutineScope)
             } catch (cancel: CancellationException) { throw cancel }
             catch (error: Exception) { fail(error.message ?: "Bluetooth connection could not start") }
         }
+    }
+
+    private suspend fun resolveConnectDevice(address: String): BluetoothDevice {
+        val adapter = requireNotNull(adapter)
+        val now = android.os.SystemClock.elapsedRealtime()
+        observed[address]
+            ?.takeIf { BleConnectCache.isFreshObservation(it.second, now) }
+            ?.first
+            ?.let { return it }
+        discoverConfiguration(address)?.let { return it }
+        adapter.bondedDevices
+            ?.firstOrNull { it.address.equals(address, true) && it.type != BluetoothDevice.DEVICE_TYPE_CLASSIC }
+            ?.let { return it }
+        if (hasPermissions()) {
+            context.getSystemService(BluetoothManager::class.java)
+                ?.getConnectedDevices(BluetoothProfile.GATT)
+                ?.firstOrNull { it.address.equals(address, true) && it.type != BluetoothDevice.DEVICE_TYPE_CLASSIC }
+                ?.let { return it }
+        }
+        return adapter.getRemoteDevice(address)
     }
 
     private fun startGatt(device: BluetoothDevice) {
@@ -163,13 +227,14 @@ class BleClient(private val context: Context, private val scope: CoroutineScope)
         }
     }
 
+    /** Address-filtered scan to refresh [BluetoothDevice] identity when the scan cache expired. */
     private suspend fun discoverConfiguration(address: String): BluetoothDevice? {
         if (!locationEnabled()) return null
         val scanner = adapter?.bluetoothLeScanner ?: return null
         var active: ScanCallback? = null
         return try {
-            withTimeoutOrNull(6000) {
-                suspendCancellableCoroutine<BluetoothDevice?> { continuation ->
+            withTimeoutOrNull(BleConnectCache.ADDRESS_DISCOVERY_TIMEOUT_MS) {
+                suspendCancellableCoroutine { continuation ->
                     val probe = object : ScanCallback() {
                         override fun onScanResult(callbackType: Int, result: ScanResult) {
                             if (result.device.address != address || !continuation.isActive) return
@@ -184,8 +249,12 @@ class BleClient(private val context: Context, private val scope: CoroutineScope)
                         }
                     }
                     active = probe
-                    scanner.startScan(listOf(ScanFilter.Builder().setDeviceAddress(address).build()),
-                        ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), probe)
+                    continuation.invokeOnCancellation { runCatching { scanner.stopScan(probe) } }
+                    scanner.startScan(
+                        listOf(ScanFilter.Builder().setDeviceAddress(address).build()),
+                        aggressiveScanSettings(),
+                        probe,
+                    )
                 }
             }
         } finally { active?.let { runCatching { scanner.stopScan(it) } } }
@@ -200,6 +269,9 @@ class BleClient(private val context: Context, private val scope: CoroutineScope)
             }
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 mutableLink.update { it.copy(phase = LinkPhase.DISCOVERING) }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    connection.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
+                }
                 if (!connection.discoverServices()) fail("Unable to discover services")
             }
         }

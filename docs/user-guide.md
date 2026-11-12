@@ -72,9 +72,12 @@ make it an X10 or enable the X10 command set.
 ### Reconnection
 
 While EasyGamepad is in the foreground, it can retry the selected X10's previously
-verified configuration address. Leaving the app disconnects the configuration
-session and attempts to stop an active calibration. Returning to the foreground
-allows reconnect attempts again.
+verified configuration address when the link is disconnected. Switching away with
+an idle, ready configuration session keeps that GATT link open so you can return
+without reconnecting. Leaving during an active calibration or macro upload runs
+cleanup and disconnects BLE; closing the app entirely also releases the link.
+Returning to the foreground allows reconnect attempts again (unless you used
+**Disconnect from app**).
 
 **Disconnect from app** pauses automatic reconnection until you reopen the app.
 It does not unpair the gameplay connection. Keep the app open throughout any
@@ -279,8 +282,9 @@ steps before choosing **Start calibration** and confirming.
 
 The controller reports success or requests a retry. After success, choose
 **Finish calibration**. **Stop calibration** ends an unfinished session and is
-not a successful result. Sessions have a 90-second limit. Leaving the app attempts
-to stop calibration and disconnects BLE; radio loss can prevent cleanup. If the
+not a successful result. Sessions have a 90-second limit. Leaving the app during
+calibration attempts to stop calibration and disconnect BLE; radio loss can
+prevent cleanup. If the
 controller remains in calibration mode, reconnect or power-cycle it before retrying.
 
 ### Version, diagnostics and factory settings
