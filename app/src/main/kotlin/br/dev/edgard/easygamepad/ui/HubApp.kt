@@ -83,7 +83,7 @@ import java.util.Locale
         val keyLinkerDevice = controller?.supportsKeyLinker == true
         val largeText = LocalDensity.current.fontScale >= 1.3f
         val reducedMotion = rememberReducedMotion()
-        val chooserLabel = tr("Choose controller: ", "Escolher controle: ") + (controller?.name ?: tr("None selected", "Nenhum selecionado"))
+        val chooserLabel = tr("Choose controller: ", "Escolher controle: ") + (controller?.displayName() ?: tr("None selected", "Nenhum selecionado"))
         val chooserState = ConsumerCopy.chooserSummary(
             status.gameplayConnected,
             status.configurationConnected,
@@ -159,7 +159,7 @@ import java.util.Locale
                             colors = NavigationRailItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.primaryContainer, selectedTextColor = MaterialTheme.colorScheme.primary))
                     }
                 }
-                RailDeviceButton(controller?.artwork, controller?.name?.removePrefix("EasySMX ") ?: tr("Devices", "Controles"),
+                RailDeviceButton(controller?.artwork, controller?.displayName()?.removePrefix("EasySMX ") ?: tr("Devices", "Controles"),
                     status.connected, chooserLabel, chooserState, compact = layout.shortHeight) { model.deviceSheet.value = true }
             }
             VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
@@ -185,7 +185,7 @@ import java.util.Locale
                         }) {
                         Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                             Box(Modifier.size(6.dp).background(if (status.connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, CircleShape))
-                            Text(controller?.name ?: tr("Devices", "Controles"), modifier = Modifier.widthIn(max = if (largeText) 220.dp else 100.dp), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
+                            Text(controller?.displayName() ?: tr("Devices", "Controles"), modifier = Modifier.widthIn(max = if (largeText) 220.dp else 100.dp), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
                             HubIcon(Glyph.ARROW, Modifier.size(12.dp).rotate(90f), MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }

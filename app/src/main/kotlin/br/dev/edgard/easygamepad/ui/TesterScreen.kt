@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import br.dev.edgard.easygamepad.HubViewModel
 import br.dev.edgard.easygamepad.data.ConsumerCopy
+import br.dev.edgard.easygamepad.demo.DemoController
 import br.dev.edgard.easygamepad.input.InputChipState
 import br.dev.edgard.easygamepad.input.InputState
 import br.dev.edgard.easygamepad.input.inputChipState
@@ -104,6 +105,7 @@ import java.util.Locale
             tr("Android input, not profile labels.", "Entrada do Android, não rótulos do perfil."),
             tr("Hardware events appear here as the OS reports them.", "Eventos de hardware aparecem aqui como o sistema os reporta."),
         )
+        if (DemoController.isDevice(controller)) SimulatedControllerBanner()
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatusPill(if (hasInput) tr("Input active", "Entrada ativa") else tr("No input selected", "Nenhuma entrada selecionada"), hasInput)
             StatusPill(ConsumerCopy.buttonsTestedCount(state.tested.size, LocalPortuguese.current), state.tested.isNotEmpty(), color = MaterialTheme.colorScheme.secondary)
@@ -125,7 +127,7 @@ import java.util.Locale
         }
         HubCard(Modifier.fillMaxWidth()) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(controller?.name ?: tr("Controller preview", "Visual do controle"), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Text(controller?.displayName() ?: tr("Controller preview", "Visual do controle"), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 TextButton(onClick = { model.app.input.reset() }, enabled = hasInput) { Text(tr("Reset", "Reiniciar")) }
             }
             if (controller?.artwork != null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

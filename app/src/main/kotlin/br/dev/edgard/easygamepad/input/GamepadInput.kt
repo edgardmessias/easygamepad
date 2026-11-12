@@ -11,6 +11,7 @@ import android.os.Build
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
+import br.dev.edgard.easygamepad.demo.DemoController
 import br.dev.edgard.easygamepad.protocol.PadKey
 import kotlin.math.roundToInt
 
@@ -25,9 +26,15 @@ data class InputState(
     val rightSamples: List<Pair<Float, Float>> = emptyList(),
 )
 class GamepadInput(context: Context) : InputManager.InputDeviceListener {
+  companion object {
+        /** Synthetic Android input id for the demo overlay; not a real [InputDevice]. */
+        const val DEMO_PAD_ID = 9_000_001
+    }
+
     private val manager = context.getSystemService(InputManager::class.java)
     private val sessions = InputSessions()
     val state = sessions.state
+    private var demoOverlay = false
     init { manager.registerInputDeviceListener(this, null); refresh() }
     private fun isPad(device: InputDevice): Boolean {
         val source = device.sources and InputDevice.SOURCE_GAMEPAD == InputDevice.SOURCE_GAMEPAD ||
@@ -38,6 +45,51 @@ class GamepadInput(context: Context) : InputManager.InputDeviceListener {
         val externalButtons = external && device.hasKeys(KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_BUTTON_B).any { it }
         return source && !device.isVirtual && (hasSticks || externalButtons)
     }
+    fun setDemoOverlay(enabled: Boolean) {
+        if (demoOverlay == enabled) return
+        demoOverlay = enabled
+        if (!enabled) sessions.snapshot(DEMO_PAD_ID).let { if (it.events > 0 || it.pressed.isNotEmpty()) sessions.update(DEMO_PAD_ID, InputState()) }
+        refresh()
+    }
+
+    fun simulateKey(keyCode: Int, down: Boolean) {
+        if (!demoOverlay) return
+        val old = sessions.snapshot(DEMO_PAD_ID)
+        sessions.update(
+            DEMO_PAD_ID,
+            old.copy(
+                pressed = if (down) old.pressed + keyCode else old.pressed - keyCode,
+                tested = old.tested + keyCode,
+                events = old.events + 1,
+            ),
+        )
+    }
+
+    fun simulateAxes(values: Map<Int, Float>) {
+        if (!demoOverlay) return
+        val old = sessions.snapshot(DEMO_PAD_ID)
+        val merged = old.axes + values
+        val hats = buildSet {
+            if ((merged[MotionEvent.AXIS_HAT_X] ?: 0f) < -.5f) add(KeyEvent.KEYCODE_DPAD_LEFT)
+            if ((merged[MotionEvent.AXIS_HAT_X] ?: 0f) > .5f) add(KeyEvent.KEYCODE_DPAD_RIGHT)
+            if ((merged[MotionEvent.AXIS_HAT_Y] ?: 0f) < -.5f) add(KeyEvent.KEYCODE_DPAD_UP)
+            if ((merged[MotionEvent.AXIS_HAT_Y] ?: 0f) > .5f) add(KeyEvent.KEYCODE_DPAD_DOWN)
+        }
+        sessions.update(
+            DEMO_PAD_ID,
+            old.copy(
+                axes = merged,
+                events = old.events + 1,
+                tested = old.tested + hats,
+                samples = StickTrails.append(old.samples, (merged[MotionEvent.AXIS_X] ?: 0f) to (merged[MotionEvent.AXIS_Y] ?: 0f)),
+                rightSamples = StickTrails.append(
+                    old.rightSamples,
+                    (merged[MotionEvent.AXIS_Z] ?: 0f) to (merged[MotionEvent.AXIS_RZ] ?: 0f),
+                ),
+            ),
+        )
+    }
+
     private fun refresh() {
         val pads = manager.inputDeviceIds.map { manager.getInputDevice(it) }.filterNotNull().filter { isPad(it) }.map {
             val battery = if (Build.VERSION.SDK_INT >= 31) runCatching {
@@ -48,13 +100,25 @@ class GamepadInput(context: Context) : InputManager.InputDeviceListener {
             }.getOrNull() else null
             InputPad(it.id, it.name, it.vendorId, it.productId, canVibrate(it), it.descriptor,
                 battery?.first, battery?.second == true)
-        }
+        } + if (demoOverlay) {
+            listOf(
+                InputPad(
+                    DEMO_PAD_ID,
+                    DemoController.DISPLAY_NAME,
+                    vendor = 0x045E,
+                    product = 0x0B13,
+                    canVibrate = false,
+                    descriptor = "easygamepad:demo:input",
+                ),
+            )
+        } else emptyList()
         sessions.refresh(pads)
     }
     fun select(id: Int?) = sessions.select(id)
     fun refreshDevices() = refresh()
     fun reset() = sessions.reset()
     fun clearPressed() = sessions.clearPressed()
+    fun clearDemoPressed() = sessions.clearPressed(DEMO_PAD_ID)
     fun identifyPaddle(paddle: PadKey?) {
         require(paddle == null || paddle.code in 1..6)
         state.value.selectedId?.let { sessions.update(it, state.value.copy(learningPaddle = paddle, pressed = emptySet())) }

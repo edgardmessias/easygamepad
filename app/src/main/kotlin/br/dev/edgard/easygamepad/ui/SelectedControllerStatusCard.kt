@@ -10,14 +10,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import br.dev.edgard.easygamepad.data.ConfigurationLinkSituation
 import br.dev.edgard.easygamepad.data.ControllerDevice
+import br.dev.edgard.easygamepad.demo.DemoController
 
 @Composable
-internal fun SelectedControllerStatusCard(device: ControllerDevice, state: ControllerPickerUiState, onOpenConnection: () -> Unit) {
+internal fun SelectedControllerStatusCard(device: ControllerDevice, state: ControllerPickerUiState, onConnect: () -> Unit) {
     HubCard(Modifier.fillMaxWidth()) {
         Text(device.productName ?: tr("Generic controller", "Controle genérico"), style = MaterialTheme.typography.titleMedium)
-        Text(device.name, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(device.displayName(), style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        if (DemoController.isDevice(device)) {
+            Description(tr("Simulated · no Bluetooth", "Simulado · sem Bluetooth"))
+        }
         val gameplay = when {
             device.inputId == null -> tr("Gameplay: not linked", "Jogo: não vinculado")
+            DemoController.isDevice(device) -> tr("Gameplay: simulated input active", "Jogo: entrada simulada ativa")
             else -> tr("Gameplay: linked to Android input #${device.inputId}", "Jogo: vinculado à entrada Android #${device.inputId}")
         }
         Description(gameplay)
@@ -31,9 +36,12 @@ internal fun SelectedControllerStatusCard(device: ControllerDevice, state: Contr
             }
             Description(config)
             if (state.configurationSituation != ConfigurationLinkSituation.READY) {
-                OutlinedButton(onClick = onOpenConnection, modifier = Modifier.fillMaxWidth()) {
-                    Text(tr("Connect or find device", "Conectar ou buscar dispositivo"))
+                val label = if (DemoController.isDevice(device)) {
+                    tr("Connect demo", "Conectar demo")
+                } else {
+                    tr("Connect or find device", "Conectar ou buscar dispositivo")
                 }
+                OutlinedButton(onClick = onConnect, modifier = Modifier.fillMaxWidth()) { Text(label) }
             }
         } else {
             Description(tr("This entry is for gameplay testing only. Add an EasySMX model to customize.", "Esta entrada serve só para teste de jogo. Adicione um modelo EasySMX para personalizar."))

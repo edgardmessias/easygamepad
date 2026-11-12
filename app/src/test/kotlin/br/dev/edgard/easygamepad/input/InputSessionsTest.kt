@@ -31,6 +31,19 @@ class InputSessionsTest {
         sessions.refresh(listOf(pads[1]))
         assertNull(sessions.state.value.selectedId)
     }
+    @Test fun clearPressedCanTargetOneDevice() {
+        val sessions = InputSessions()
+        sessions.refresh(pads)
+        sessions.select(3)
+        sessions.update(3, InputState(pressed = setOf(96), axes = mapOf(1 to .5f)))
+        sessions.update(7, InputState(pressed = setOf(97), axes = mapOf(2 to .75f)))
+        sessions.clearPressed(3)
+        assertTrue(sessions.snapshot(3).pressed.isEmpty())
+        assertEquals(setOf(97), sessions.snapshot(7).pressed)
+        sessions.select(7)
+        assertEquals(setOf(97), sessions.state.value.pressed)
+    }
+
     @Test fun backgroundClearsHeldInputsOnAllDevicesAndSwitchCancelsIdentification() {
         val sessions = InputSessions(); sessions.refresh(pads); sessions.select(3)
         sessions.update(3, InputState(pressed = setOf(96), learningPaddle = PadKey.M1))

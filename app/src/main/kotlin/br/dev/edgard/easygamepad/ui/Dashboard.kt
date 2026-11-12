@@ -22,6 +22,7 @@ import br.dev.edgard.easygamepad.HubViewModel
 import br.dev.edgard.easygamepad.ble.LinkState
 import br.dev.edgard.easygamepad.data.HardwareState
 import br.dev.edgard.easygamepad.data.controllerStatus
+import br.dev.edgard.easygamepad.demo.DemoController
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable fun Dashboard(model: HubViewModel, hardware: HardwareState, link: LinkState) {
@@ -78,11 +79,23 @@ import br.dev.edgard.easygamepad.data.controllerStatus
                     else -> tr("Turn on your controller in BT mode and keep it nearby.", "Ligue o controle no modo BT e mantenha por perto.")
                 })
                 AnimatedVisibility(status.connecting) { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+                val isDemo = DemoController.isDevice(device)
                 Button(onClick = model::connectSelected, enabled = !status.connecting && !switching, modifier = Modifier.fillMaxWidth()) {
-                    HubIcon(Glyph.BLUETOOTH, Modifier.size(18.dp), MaterialTheme.colorScheme.onPrimary)
-                    Spacer(Modifier.width(8.dp)); Text(if (status.connecting) tr("Connecting…", "Conectando…") else tr("Connect to app", "Conectar ao app"))
+                    if (!isDemo) HubIcon(Glyph.BLUETOOTH, Modifier.size(18.dp), MaterialTheme.colorScheme.onPrimary)
+                    if (!isDemo) Spacer(Modifier.width(8.dp))
+                    Text(
+                        when {
+                            status.connecting -> tr("Connecting…", "Conectando…")
+                            isDemo -> tr("Connect demo", "Conectar demo")
+                            else -> tr("Connect to app", "Conectar ao app")
+                        },
+                    )
                 }
-                TextButton(onClick = { model.connectionSheet.value = true }) { Text(tr("Find configuration connection", "Buscar conexão do controle")) }
+                if (!isDemo) {
+                    TextButton(onClick = { model.connectionSheet.value = true }) {
+                        Text(tr("Find configuration connection", "Buscar conexão do controle"))
+                    }
+                }
             } }
             SectionTitle(tr("Make it yours", "Do seu jeito"))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -119,8 +132,8 @@ import br.dev.edgard.easygamepad.data.controllerStatus
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Eyebrow(tr("Your controller", "Seu controle"), color = MaterialTheme.colorScheme.primary)
-                    Text(device.name, style = screenTitleStyle())
-                    Description((device.productName?.takeIf { it != device.name }?.let { "$it · " } ?: "") + device.shortId)
+                    Text(device.displayName(), style = screenTitleStyle())
+                    Description(device.listSubtitle())
                 }
                 // Wide windows: the rail's controller card opens Manage, so the header holds the front/back switch.
                 if (layout.twoPane && device.artwork != null) sides()
@@ -135,9 +148,11 @@ import br.dev.edgard.easygamepad.data.controllerStatus
                 }, status.configurationConnected, color = MaterialTheme.colorScheme.secondary)
             } }
             pills()
-            if (devices.size > 1) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                devices.forEach { row -> FilterChip(row.id == device.id, { if (!switching) model.chooseDevice(row) },
-                    label = { Text(row.name) }, enabled = canSwitchController) }
+            if (DemoController.isDevice(device)) SimulatedControllerBanner()
+            val chooserDevices = devices.filter { it.id != DemoController.ID }.ifEmpty { devices }
+            if (chooserDevices.size > 1) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                chooserDevices.forEach { row -> FilterChip(row.id == device.id, { if (!switching) model.chooseDevice(row) },
+                    label = { Text(row.displayName()) }, enabled = canSwitchController) }
             }
             if (device.artwork != null && !layout.twoPane) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { sides() }
             ControllerStage(Modifier.fillMaxWidth().height(layout.stageHeight(188.dp)), device.artwork,

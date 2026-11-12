@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import br.dev.edgard.easygamepad.ble.LinkPhase
 import br.dev.edgard.easygamepad.data.*
+import br.dev.edgard.easygamepad.demo.DemoController
 import br.dev.edgard.easygamepad.input.InputPad
 import br.dev.edgard.easygamepad.protocol.DeviceProfile
 
@@ -31,7 +32,7 @@ data class ControllerPickerUiState(
         linkPhase == LinkPhase.READY && linkAddress != null && linkAddress == device.address
 
     val switchBlocked: Boolean get() = !canSwitch
-    val emptyDeviceList: Boolean get() = devices.isEmpty()
+    val emptyDeviceList: Boolean get() = devices.none { it.id != DemoController.ID }
     val configurationSituation: ConfigurationLinkSituation get() = configurationLinkSituation(selected, connection)
 }
 
@@ -41,9 +42,10 @@ data class ControllerPickerActions(
     val onRenameDevice: (ControllerDevice, String) -> Unit,
     val onLinkGameplay: (Int?) -> Unit,
     val onOpenConnection: () -> Unit,
+    val onConnectSelected: () -> Unit,
 ) {
     companion object {
-        val noop = ControllerPickerActions({}, { _, _ -> }, { _, _ -> }, {}, {})
+        val noop = ControllerPickerActions({}, { _, _ -> }, { _, _ -> }, {}, {}, {})
     }
 }
 
@@ -66,6 +68,7 @@ data class ControllerPickerActions(
             onRenameDevice = model::renameDevice,
             onLinkGameplay = model::linkGameplay,
             onOpenConnection = { model.connectionSheet.value = true },
+            onConnectSelected = model::connectSelected,
         ),
     )
 }
@@ -77,21 +80,30 @@ data class ControllerPickerActions(
     Column(Modifier.fillMaxWidth().heightIn(max = 680.dp).verticalScroll(rememberScrollState()).padding(horizontal = 22.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text(tr("Your controllers", "Seus controles"), style = MaterialTheme.typography.headlineMedium)
         Description(tr("Saved entries stay on your phone. Bluetooth configuration is separate from the gameplay connection Android games use.", "As entradas salvas ficam no celular. A configuração Bluetooth é separada da conexão de jogo usada pelos jogos."))
-        selected?.let { device -> SelectedControllerStatusCard(device, state, actions.onOpenConnection) }
+        selected?.let { device ->
+            SelectedControllerStatusCard(
+                device,
+                state,
+                onConnect = if (DemoController.isDevice(device)) actions.onConnectSelected else actions.onOpenConnection,
+            )
+        }
         if (state.switchBlocked) InfoBanner(tr("Finish the current operation before switching controllers.", "Finalize a operação atual antes de trocar de controle."))
         state.devices.forEach { device ->
             val isSelected = selected?.id == device.id
             ControllerChoiceCard(
-                device, isSelected,
+                device,
+                isSelected,
                 savedDeviceLinkLabel(device, isSelected, state.connection),
                 state.canSwitch,
             ) {
                 actions.onChooseDevice(device)
             }
-            TextButton(onClick = { renaming = device }, enabled = state.canSwitch) {
-                HubIcon(Glyph.EDIT, Modifier.size(16.dp), MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(8.dp))
-                Text(tr("Rename", "Renomear") + " · " + device.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (device.id != DemoController.ID) {
+                TextButton(onClick = { renaming = device }, enabled = state.canSwitch) {
+                    HubIcon(Glyph.EDIT, Modifier.size(16.dp), MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(8.dp))
+                    Text(tr("Rename", "Renomear") + " · " + device.displayName(), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
         if (state.emptyDeviceList) Description(tr("Pair a gamepad in Android settings or add an EasySMX configuration connection.", "Pareie um controle nos ajustes do Android ou adicione a conexão de configuração de um EasySMX."))
@@ -103,14 +115,14 @@ data class ControllerPickerActions(
         }
         Description(tr("X10, X20 and X20 Pro settings can be changed. X20 and X20 Pro changes are read back to confirm them.",
             "Os ajustes do X10, X20 e X20 Pro podem ser alterados. No X20 e X20 Pro, cada alteração é relida para confirmar."))
-        if (selected?.hasConfigurationLink == true && selected.address != null) {
+        if (selected?.hasConfigurationLink == true && selected.address != null && !DemoController.isDevice(selected)) {
             HorizontalDivider()
             Text(tr("Which controller do you want to test?", "Qual controle você quer testar?"), style = MaterialTheme.typography.titleMedium)
             val product = selected.productName ?: "EasySMX X10"
             Description(tr("Your $product may appear under another name in Android, such as Xbox Wireless Controller. If you have more than one, choose the one that matches this controller.",
                 "Seu $product pode aparecer com outro nome no Android, como Xbox Wireless Controller. Se houver mais de um, escolha o que corresponde a este controle."))
-            state.gameplayPads.forEach { pad ->
-                val linkedName = state.devices.firstOrNull { it.inputId == pad.id }?.name ?: pad.name
+            state.gameplayPads.filter { it.descriptor != "easygamepad:demo:input" }.forEach { pad ->
+                val linkedName = state.devices.firstOrNull { it.inputId == pad.id }?.displayName() ?: pad.name
                 val ambiguous = ambiguousInputDescriptor(pad.descriptor, state.gameplayPads.count { it.descriptor == pad.descriptor })
                 Surface(onClick = { actions.onLinkGameplay(pad.id) }, enabled = state.canSwitch, shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
                     Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -135,7 +147,7 @@ data class ControllerPickerActions(
                 Text(tr("Remove test connection", "Desvincular controle do teste"))
             }
         }
-        if (selected != null && selected.address == null && selected.inputId != null) {
+        if (selected != null && selected.address == null && selected.inputId != null && !DemoController.isDevice(selected)) {
             Description(tr("Pick the EasySMX model for customization. VID/PID alone does not enable settings.", "Escolha o modelo EasySMX para personalização. VID/PID sozinhos não habilitam ajustes."))
             DeviceProfile.ALL.forEach { profile ->
                 TextButton(onClick = { modelConfirm = profile }, enabled = state.canSwitch) {

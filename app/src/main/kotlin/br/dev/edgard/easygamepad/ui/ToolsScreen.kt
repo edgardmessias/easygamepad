@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import br.dev.edgard.easygamepad.BuildConfig
 import br.dev.edgard.easygamepad.HubViewModel
+import br.dev.edgard.easygamepad.demo.DemoController
 import br.dev.edgard.easygamepad.ble.LinkPhase
 import br.dev.edgard.easygamepad.data.DiagnosticsSanitizer
 import br.dev.edgard.easygamepad.protocol.*
@@ -24,6 +25,7 @@ import java.util.Date
 import java.util.Locale
 
 @Composable fun ToolsScreen(model: HubViewModel) {
+    val selectedDevice by model.selectedDevice.collectAsStateWithLifecycle()
     val state by model.hardware.collectAsStateWithLifecycle()
     val link by model.link.collectAsStateWithLifecycle()
     val logs by model.ble.logs.collectAsStateWithLifecycle()
@@ -38,6 +40,7 @@ import java.util.Locale
     val ready = link.phase == LinkPhase.READY
     ScreenColumn {
         ScreenHeading(tr("Controller care", "Cuidados com o controle"), tr("Fine-tune your game.", "Tudo no ponto."), tr("Guided calibration and tools for your X10.", "Calibração guiada e ferramentas para seu X10."))
+        if (DemoController.isDevice(selectedDevice)) SimulatedControllerBanner()
         ScreenLinkStatus(ready, tr("App connected", "App conectado"), tr("Connect to calibrate", "Conecte para calibrar"))
         if (!ready) OutlinedButton(onClick = model::connectSelected, modifier = Modifier.fillMaxWidth()) { Text(tr("Connect to app", "Conectar ao app")) }
         HubCard(Modifier.fillMaxWidth()) {
