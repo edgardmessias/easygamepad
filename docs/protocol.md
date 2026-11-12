@@ -65,7 +65,7 @@ on session close; it does not supply a checksum or general corruption recovery.
 
 | Timer | Current implementation |
 | --- | --- |
-| User scan window | 12 seconds |
+| User scan window | 12 seconds (list also seeded from bonded and GATT-connected devices at scan start) |
 | Connection setup | 18 seconds |
 | Individual GATT chunk write | 4 seconds |
 | Command request, including writing and awaiting a response | 5 seconds |
