@@ -3,6 +3,7 @@
 package br.dev.edgard.easygamepad.data
 
 import br.dev.edgard.easygamepad.ble.*
+import br.dev.edgard.easygamepad.demo.ConfigurationLinkHub
 import br.dev.edgard.easygamepad.protocol.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -29,6 +30,11 @@ class ControllerRepository internal constructor(
     constructor(ble: BleClient, scope: CoroutineScope) : this(
         ble, ble.link, scope, ble::log,
         onDisconnect = { ble.stopScan(); ble.disconnect() },
+    )
+
+    constructor(hub: ConfigurationLinkHub, scope: CoroutineScope) : this(
+        hub, hub.link, scope, hub::log,
+        onDisconnect = { hub.disconnectAll() },
     )
 
     private class KrlyConnection(val address: String, val session: CommandSession)

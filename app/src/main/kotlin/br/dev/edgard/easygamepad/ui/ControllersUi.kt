@@ -23,6 +23,7 @@ import br.dev.edgard.easygamepad.protocol.DeviceProfile
     selected: Boolean,
     linkLabel: SavedDeviceLinkLabel = SavedDeviceLinkLabel.SAVED_ONLY,
     enabled: Boolean = true,
+    headline: String? = null,
     onClick: () -> Unit,
 ) {
     Surface(onClick = onClick, enabled = enabled, shape = RoundedCornerShape(20.dp), color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
@@ -32,8 +33,8 @@ import br.dev.edgard.easygamepad.protocol.DeviceProfile
             if (art != null) ArtworkThumbnail(art, Modifier.width(64.dp).height(44.dp))
             else HubIcon(Glyph.TEST, Modifier.size(28.dp), if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(device.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text((device.productName?.takeIf { it != device.name }?.let { "$it · " } ?: "") + device.shortId,
+                Text(headline ?: device.displayName(), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(device.listSubtitle(),
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
                     when (linkLabel) {

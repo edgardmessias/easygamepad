@@ -10,6 +10,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import br.dev.edgard.easygamepad.data.*
 import br.dev.edgard.easygamepad.ble.LinkPhase
+import br.dev.edgard.easygamepad.demo.DemoAdbConnectAction
+import br.dev.edgard.easygamepad.demo.DemoAdbCoordinator
+import br.dev.edgard.easygamepad.demo.DemoAdbLifecyclePolicy
+import br.dev.edgard.easygamepad.demo.DemoController
+import br.dev.edgard.easygamepad.demo.HubSelectionStartupPolicy
+import br.dev.edgard.easygamepad.demo.DemoLinkSnapshot
+import br.dev.edgard.easygamepad.input.GamepadInput
 import br.dev.edgard.easygamepad.input.GamepadVibrationAvailability
 import br.dev.edgard.easygamepad.input.vibrationAvailability
 import br.dev.edgard.easygamepad.protocol.*
@@ -30,6 +37,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     val app = application as HubApplication
     val repository = app.repository
     val ble = app.ble
+    val configuration = app.configuration
     val preferences = app.store.preferences.stateIn(viewModelScope, SharingStarted.Eagerly, HubPreferences())
     private val selectedId = MutableStateFlow<String?>(null)
     private val setupInput = MutableStateFlow<String?>(null)
@@ -42,11 +50,16 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     val switching = MutableStateFlow(false)
     private val drafts = ControllerDrafts()
     private var selectionRevision = 0L
+    @Volatile private var selectionRestoreComplete = false
     private var draftEpoch = 0L
     private var editorGeneration = 0L
     private val draftBaselineRevision = MutableStateFlow(0L)
-    val devices = combine(preferences, inputPads(), runtimeLinks, sessionNames) { prefs, pads, links, names ->
-        controllerDevices(prefs.controllers, pads, links, prefs.inputNames, names)
+    val devices = combine(preferences, inputPads(), runtimeLinks, sessionNames, selectedId) { prefs, pads, links, names, selected ->
+        val listed = controllerDevices(prefs.controllers, pads, links, prefs.inputNames, names)
+        appendDemoController(
+            listed,
+            linkDemoInput = selected == DemoController.ID && pads.any { it.id == GamepadInput.DEMO_PAD_ID },
+        )
     }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val selectedDevice = combine(devices, selectedId, setupInput, setupGatt, setupModel) { rows, id, descriptor, gatt, model ->
@@ -76,7 +89,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     val input = app.input.state
     val vibrationTestAvailability = input.map { it.vibrationAvailability() }.distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, GamepadVibrationAvailability.NO_DEVICE)
-    val link = ble.link
+    val link = configuration.link
     val canTestX10Vibration = combine(selectedDevice, link, operationGate.canSwitch) { device, connection, idle ->
         device?.isX10 == true && device.address != null && device.address == connection.address &&
             connection.phase == LinkPhase.READY && connection.protocol == ConfigurationProtocol.KRLY && idle
@@ -91,18 +104,73 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     private val vibrationPreviewActivity = MutableStateFlow(X10VibrationPreviewActivity())
     val x10VibrationPreview = vibrationPreviewActivity.asStateFlow()
 
+    private fun demoLinkSnapshot() = DemoLinkSnapshot(
+        configuration.link.value.phase,
+        configuration.link.value.address,
+    )
+
+    private val adbCoordinator = object : DemoAdbCoordinator {
+        override fun adbConnectDemo() {
+            when (DemoAdbLifecyclePolicy.decideConnect(
+                operationGate.canSwitchNow(),
+                selectedId.value,
+                selectionRestoreComplete,
+                configuration.usesDemo,
+                demoLinkSnapshot(),
+            )) {
+                DemoAdbConnectAction.BLOCKED -> return
+                DemoAdbConnectAction.NOOP -> return
+                DemoAdbConnectAction.SELECT_DEMO -> {
+                    manuallyDisconnected = false
+                    changeSelection(DemoController.ID)
+                }
+                DemoAdbConnectAction.CONNECT_DEMO -> {
+                    manuallyDisconnected = false
+                    connectSelected()
+                }
+            }
+        }
+
+        override fun adbDisconnectDemo() {
+            if (!DemoAdbLifecyclePolicy.allowDisconnect(
+                    operationGate.canSwitchNow(),
+                    selectedId.value,
+                    configuration.usesDemo,
+                )) return
+            manuallyDisconnected = true
+            selectionRevision++
+            configuration.disconnectDemo()
+        }
+
+        override fun adbFactoryReset() {
+            if (!DemoAdbLifecyclePolicy.allowFactoryReset(
+                    operationGate.canSwitchNow(),
+                    selectedId.value,
+                    configuration.usesDemo,
+                    demoLinkSnapshot(),
+                )) return
+            app.configuration.demo.factoryReset()
+            app.input.clearDemoPressed()
+            viewModelScope.launch { repository.refreshBattery() }
+        }
+    }
+
     init {
-        viewModelScope.launch { ble.link.collect { noticePresenter.onLinkPhase(it.phase) } }
+        viewModelScope.launch { configuration.link.collect { noticePresenter.onLinkPhase(it.phase) } }
         viewModelScope.launch {
+            val restoreRevision = selectionRevision
             val prefs = app.store.preferences.first()
             drafts.restore(prefs.workspaceDrafts)
-            selectedId.value = prefs.controllers.firstOrNull { it.address == prefs.address }?.let { "ble:${it.address}" }
-                ?: controllerDevices(prefs.controllers, app.input.state.value.pads).firstOrNull()?.id
-            val workspaceKey = selectedId.value ?: LOCAL_EDITOR_WORKSPACE_KEY
-            prefs.workspaceDrafts[workspaceKey]?.let { snap ->
-                mutableDraft.value = snap.config
-                mutableSavedProfileId.value = snap.linkedSavedProfileId
+            val restoredId = prefs.controllers.firstOrNull { it.address == prefs.address }?.let { "ble:${it.address}" }
+            if (HubSelectionStartupPolicy.shouldApplyRestoredSelection(restoreRevision, selectionRevision, selectedId.value)) {
+                selectedId.value = restoredId
+                val workspaceKey = selectedId.value ?: LOCAL_EDITOR_WORKSPACE_KEY
+                prefs.workspaceDrafts[workspaceKey]?.let { snap ->
+                    mutableDraft.value = snap.config
+                    mutableSavedProfileId.value = snap.linkedSavedProfileId
+                }
             }
+            selectionRestoreComplete = true
         }
         viewModelScope.launch {
             combine(selectedId, draft, savedProfileId, draftBaselineRevision) { id, config, linked, _ ->
@@ -122,7 +190,12 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
                 }
         }
         viewModelScope.launch {
-            devices.collect { rows -> if (selectedId.value == null && rows.isNotEmpty()) selectedId.value = rows.first().id }
+            devices.collect { rows ->
+                if (!HubSelectionStartupPolicy.shouldAutoPickFirstDevice(selectionRestoreComplete, selectedId.value, rows.isNotEmpty())) {
+                    return@collect
+                }
+                selectedId.value = rows.firstOrNull { it.id != DemoController.ID }?.id
+            }
         }
         viewModelScope.launch {
             inputPads().collect { pads ->
@@ -130,17 +203,47 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
                 sessionNames.update { names -> names.filterKeys { it in active } }
             }
         }
-        viewModelScope.launch { selectedDevice.collect { app.input.select(it?.inputId) } }
         viewModelScope.launch {
-            ble.link.collect { state ->
+            selectedDevice.collect { device ->
+                when {
+                    DemoController.isDevice(device) -> {
+                        app.input.setDemoOverlay(true)
+                        app.input.select(device!!.inputId ?: br.dev.edgard.easygamepad.input.GamepadInput.DEMO_PAD_ID)
+                    }
+                    else -> {
+                        app.input.setDemoOverlay(false)
+                        app.input.select(device?.inputId)
+                    }
+                }
+            }
+        }
+        viewModelScope.launch {
+            configuration.link.collect { state ->
                 if (state.phase == LinkPhase.READY && state.address != null) {
                     val revision = selectionRevision
                     val previousId = selectedId.value
+                    if (!HubSelectionStartupPolicy.mayApplyLinkReadySelection(selectionRestoreComplete, previousId)) {
+                        return@collect
+                    }
+                    if (DemoController.isDemoAddress(state.address)) {
+                        if (selectionRevision != revision || switching.value || manuallyDisconnected ||
+                            configuration.link.value.phase != LinkPhase.READY ||
+                            configuration.link.value.address != state.address) return@collect
+                        if (previousId != DemoController.ID) {
+                            val switched = drafts.switch(previousId, DemoController.ID, mutableDraft.value, savedProfileId.value, previousId == SETUP_ID)
+                            mutableDraft.value = switched.config
+                            mutableSavedProfileId.value = switched.linkedSavedProfileId
+                        }
+                        selectedId.value = DemoController.ID
+                        app.demoBridge.ensureDemoInputSelected()
+                        setupInput.value = null
+                        return@collect
+                    }
                     val target = "ble:${state.address}"
                     val descriptor = setupInput.value ?: selectedDevice.value?.takeIf { it.address == state.address }?.inputDescriptor
                     app.store.device(state.address, connectingGatt ?: preferences.value.gatt, descriptor, connectingModel)
                     if (selectionRevision != revision || switching.value || manuallyDisconnected ||
-                        ble.link.value.phase != LinkPhase.READY || ble.link.value.address != state.address) return@collect
+                        configuration.link.value.phase != LinkPhase.READY || configuration.link.value.address != state.address) return@collect
                     if (previousId != target) {
                         val switched = drafts.switch(previousId, target, mutableDraft.value, savedProfileId.value, previousId == SETUP_ID)
                         mutableDraft.value = switched.config
@@ -160,6 +263,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         viewModelScope.launch { runX10VibrationPreviewWorker() }
+        app.demoBridge.coordinator = adbCoordinator
     }
     fun chooseDevice(device: ControllerDevice) {
         if (device.id == selectedId.value) { deviceSheet.value = false; return }
@@ -185,7 +289,16 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
                 selectedId.value = id
                 deviceSheet.value = false
                 connectionSheet.value = false
+                applyDemoSelection(id)
             } finally { switching.value = false }
+        }
+    }
+    private fun applyDemoSelection(id: String?) {
+        if (id == DemoController.ID) {
+            configuration.connectDemo()
+            app.demoBridge.ensureDemoInputSelected()
+        } else {
+            app.input.setDemoOverlay(false)
         }
     }
     fun addX10(fromSelectedInput: Boolean = false) = addController(DeviceProfile.X10, fromSelectedInput)
@@ -205,6 +318,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun linkGameplay(inputId: Int?) {
         val target = selectedDevice.value ?: return
+        if (DemoController.isDevice(target)) return
         val address = target.address ?: return
         if (!operationGate.canSwitchNow()) return
         val pad = app.input.state.value.pads.firstOrNull { it.id == inputId }
@@ -212,6 +326,14 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { app.store.linkInput(address, pad?.descriptor) }
     }
     fun renameDevice(device: ControllerDevice, value: String) {
+        if (DemoController.isDevice(device)) {
+            repository.notice(
+                "The demo controller name is fixed.",
+                "O nome do controle demo é fixo.",
+                survivesDisconnect = true,
+            )
+            return
+        }
         val name = runCatching { controllerName(value) }.getOrElse { return }
         viewModelScope.launch {
             runCatching {
@@ -235,17 +357,17 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     private fun configurationTarget(): Boolean = selectedDevice.value?.let {
-        it.supportsConfiguration && !switching.value && it.address != null && it.address == ble.link.value.address &&
-            ble.link.value.phase == LinkPhase.READY && ble.link.value.protocol == ConfigurationProtocol.KRLY
+        it.supportsConfiguration && !switching.value && it.address != null && it.address == configuration.link.value.address &&
+            configuration.link.value.phase == LinkPhase.READY && configuration.link.value.protocol == ConfigurationProtocol.KRLY
     } == true
     private fun keyLinkerTarget(): Boolean = selectedDevice.value?.let {
         it.supportsKeyLinker && !switching.value && it.address != null && it.address == ble.link.value.address &&
             ble.link.value.phase == LinkPhase.READY && ble.link.value.protocol == ConfigurationProtocol.KEYLINKER
     } == true
     private fun captureOperationBinding(): OperationBinding? =
-        OperationBinding.capture(selectionRevision, selectedId.value, ble.link.value, draftEpoch)
+        OperationBinding.capture(selectionRevision, selectedId.value, configuration.link.value, draftEpoch)
     private fun stillBoundToOperation(binding: OperationBinding): Boolean =
-        binding.matchesResult(selectionRevision, selectedId.value, ble.link.value)
+        binding.matchesResult(selectionRevision, selectedId.value, configuration.link.value)
     fun edit(update: (ControllerConfig) -> ControllerConfig) {
         val workspace = editorWorkspaceKey()
         val before = mutableDraft.value
@@ -320,6 +442,13 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     fun connect(address: String, gatt: GattProfile = selectedDevice.value?.gatt ?: preferences.value.gatt) {
         val device = selectedDevice.value
         if (device?.hasConfigurationLink != true || !operationGate.canSwitchNow()) return
+        if (DemoController.isDemoAddress(address)) {
+            manuallyDisconnected = false
+            selectionRevision++
+            configuration.connectDemo()
+            connectionSheet.value = false
+            return
+        }
         val model = device.profile ?: DeviceProfile.X10
         manuallyDisconnected = false
         selectionRevision++
@@ -335,7 +464,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
         // KeyLinker always uses its own GATT service; custom UUIDs apply to the X10 channel only.
         val profile = if (protocol == ConfigurationProtocol.KEYLINKER) model.gatt else gatt
         connectingGatt = profile; connectingModel = model.id
-        ble.connect(address, profile, protocol, model.name)
+        configuration.connectBle(address, profile, protocol, model.name)
     }
     /** Saves the model the controller reported, after the person confirmed it. */
     fun useIdentifiedModel() {
@@ -372,8 +501,15 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
                 if (now >= inputRefreshAt) { app.input.refreshDevices(); inputRefreshAt = now + 30_000 }
                 val device = selectedDevice.value
                 if (device?.id != retryDevice) { retryDevice = device?.id; retryAt = 0; backoff = 5_000 }
+                if (DemoController.isDevice(device)) {
+                    if (!manuallyDisconnected && !switching.value && configuration.link.value.phase == LinkPhase.DISCONNECTED) {
+                        configuration.connectDemo()
+                    }
+                    delay(1_500)
+                    continue
+                }
                 if (!manuallyDisconnected && !switching.value && !deviceSheet.value && !connectionSheet.value && !ble.scanning.value &&
-                    ble.link.value.phase == LinkPhase.DISCONNECTED && ble.enabled() &&
+                    configuration.link.value.phase == LinkPhase.DISCONNECTED && ble.enabled() &&
                     device?.hasConfigurationLink == true && !device.address.isNullOrBlank() && now >= retryAt) {
                     selectionRevision++
                     runCatching { openLink(requireNotNull(device.address), device.gatt, device.profile ?: DeviceProfile.X10) }
@@ -381,7 +517,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
                     retryAt = now + backoff + 18_000L
                     backoff = (backoff * 2).coerceAtMost(60_000L)
                 }
-                if (ble.link.value.phase == LinkPhase.READY) { backoff = 5_000; retryAt = 0 }
+                if (configuration.link.value.phase == LinkPhase.READY) { backoff = 5_000; retryAt = 0 }
                 delay(1_500)
             }
         }
@@ -389,7 +525,10 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     fun disconnect() {
         manuallyDisconnected = true
         selectionRevision++
-        disconnectJob = app.scope.launch { repository.disconnect() }
+        disconnectJob = app.scope.launch {
+            if (DemoController.isDevice(selectedDevice.value)) configuration.disconnectDemo()
+            else repository.disconnect()
+        }
     }
     fun refreshBattery() {
         app.input.refreshDevices()
@@ -410,6 +549,13 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun connectSelected() {
         val target = selectedDevice.value ?: return
+        if (DemoController.isDevice(target)) {
+            manuallyDisconnected = false
+            selectionRevision++
+            configuration.connectDemo()
+            app.demoBridge.ensureDemoInputSelected()
+            return
+        }
         if (target.address != null && ble.enabled()) connect(target.address) else connectionSheet.value = true
     }
     fun readMappings() { if (configurationTarget()) viewModelScope.launch { repository.readMappings()?.let { mappings -> edit { it.copy(mappings = mappings) } } } }
@@ -555,6 +701,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     private fun canPreviewX10Vibration() =
         selectedDevice.value?.isX10 == true && configurationTarget() && operationGate.canSwitchNow()
     override fun onCleared() {
+        if (app.demoBridge.coordinator === adbCoordinator) app.demoBridge.coordinator = null
         repository.stopX10VibrationPreviewAsync()
         super.onCleared()
     }

@@ -32,6 +32,7 @@ class ControllerPickerUiStateTest {
         ControllerPickerActions.noop.onRenameDevice(ScreenUiFixtures.savedX10Disconnected, "Test")
         ControllerPickerActions.noop.onLinkGameplay(1)
         ControllerPickerActions.noop.onOpenConnection()
+        ControllerPickerActions.noop.onConnectSelected()
     }
 
     @Test fun configurationSituationUsesSelectedDevice() {

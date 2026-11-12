@@ -7,6 +7,7 @@ Start with the [project overview](../README.md), or choose a guide below.
 | Guide | Contents |
 | --- | --- |
 | [User guide](user-guide.md) | Setup, connections, input testing, profiles, customization and troubleshooting |
+| [Demo controller](demo-controller.md) | Simulated X10 for UI testing without hardware; debug ADB commands |
 | [Build and install](../CONTRIBUTING.md#build-and-install) | Build a debug APK and install it with ADB |
 
 ## Developing and contributing

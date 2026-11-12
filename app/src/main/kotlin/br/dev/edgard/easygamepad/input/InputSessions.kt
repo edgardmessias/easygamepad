@@ -30,8 +30,15 @@ class InputSessions {
         mutableState.value = (valid?.let(::snapshot) ?: InputState()).copy(pads = state.value.pads, selectedId = valid)
     }
     fun reset() { state.value.selectedId?.let { update(it, InputState()) } }
-    fun clearPressed() {
-        snapshots.replaceAll { _, value -> value.copy(pressed = emptySet(), axes = emptyMap(), learningPaddle = null) }
-        mutableState.value = state.value.copy(pressed = emptySet(), axes = emptyMap(), learningPaddle = null)
+    fun clearPressed(padId: Int? = null) {
+        if (padId == null) {
+            snapshots.replaceAll { _, value -> value.copy(pressed = emptySet(), axes = emptyMap(), learningPaddle = null) }
+            mutableState.value = state.value.copy(pressed = emptySet(), axes = emptyMap(), learningPaddle = null)
+            return
+        }
+        snapshots[padId]?.let { snapshots[padId] = it.copy(pressed = emptySet(), axes = emptyMap(), learningPaddle = null) }
+        if (state.value.selectedId == padId) {
+            mutableState.value = state.value.copy(pressed = emptySet(), axes = emptyMap(), learningPaddle = null)
+        }
     }
 }

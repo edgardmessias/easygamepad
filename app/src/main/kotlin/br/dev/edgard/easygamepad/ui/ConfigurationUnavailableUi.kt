@@ -9,12 +9,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import br.dev.edgard.easygamepad.HubViewModel
+import br.dev.edgard.easygamepad.demo.DemoController
 import br.dev.edgard.easygamepad.protocol.DeviceProfile
 
 data class ConfigurationUnavailableUiState(
     val deviceName: String? = null,
     val gameplayLinked: Boolean = false,
     val hasBleAddress: Boolean = false,
+    val simulated: Boolean = false,
 )
 
 data class ConfigurationUnavailableActions(
@@ -30,7 +32,12 @@ data class ConfigurationUnavailableActions(
 @Composable fun ConfigurationUnavailable(model: HubViewModel) {
     val device by model.selectedDevice.collectAsStateWithLifecycle()
     ConfigurationUnavailableContent(
-        ConfigurationUnavailableUiState(device?.name, device?.inputId != null, device?.address != null),
+        ConfigurationUnavailableUiState(
+            device?.displayName(),
+            device?.inputId != null,
+            device?.address != null,
+            simulated = DemoController.isDevice(device),
+        ),
         ConfigurationUnavailableActions(
             onOpenTestTab = { model.tab.value = 2 },
             onOpenDeviceSheet = { model.deviceSheet.value = true },
@@ -42,6 +49,7 @@ data class ConfigurationUnavailableActions(
 @Composable fun ConfigurationUnavailableContent(state: ConfigurationUnavailableUiState, actions: ConfigurationUnavailableActions) {
     ScreenColumn {
         ScreenHeading(tr("Selected controller", "Controle selecionado"), state.deviceName ?: tr("Choose your controller", "Escolha seu controle"))
+        if (state.simulated) SimulatedControllerBanner()
         HubCard(Modifier.fillMaxWidth()) {
             HubIcon(Glyph.PROFILES, Modifier.size(34.dp), MaterialTheme.colorScheme.secondary)
             Text(tr("Device-specific settings", "Ajustes por dispositivo"), style = MaterialTheme.typography.titleLarge)

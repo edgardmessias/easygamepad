@@ -54,6 +54,7 @@ import br.dev.edgard.easygamepad.data.DraftStatusKind
 import br.dev.edgard.easygamepad.data.ProfileStore
 import br.dev.edgard.easygamepad.data.SavedProfile
 import br.dev.edgard.easygamepad.data.canAddSavedProfile
+import br.dev.edgard.easygamepad.demo.DemoController
 import br.dev.edgard.easygamepad.input.GamepadVibrationAvailability
 import br.dev.edgard.easygamepad.protocol.*
 import kotlinx.coroutines.Dispatchers
@@ -61,6 +62,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable fun ProfilesScreen(model: HubViewModel) {
+    val selected by model.selectedDevice.collectAsStateWithLifecycle()
     val draft by model.draft.collectAsStateWithLifecycle()
     val prefs by model.preferences.collectAsStateWithLifecycle()
     val hardware by model.hardware.collectAsStateWithLifecycle()
@@ -176,6 +178,9 @@ import kotlinx.coroutines.withContext
             onLoad = { loadDialog = it }, onDelete = { deleteDialog = it.id })
     } else {
         Column(Modifier.fillMaxSize().imePadding()) {
+            if (DemoController.isDevice(selected)) {
+                SimulatedControllerBanner()
+            }
             Row(Modifier.fillMaxWidth().padding(start = ScreenLayout.horizontalPadding, end = 8.dp, top = 4.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { editingName = !editingName }, modifier = Modifier.weight(1f).heightIn(min = 48.dp).semantics {

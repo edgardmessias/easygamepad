@@ -2,6 +2,8 @@
 // Copyright (C) 2026 Edgard
 package br.dev.edgard.easygamepad.data
 
+import br.dev.edgard.easygamepad.demo.DemoController
+import br.dev.edgard.easygamepad.input.GamepadInput
 import br.dev.edgard.easygamepad.input.InputPad
 import br.dev.edgard.easygamepad.protocol.DeviceProfile
 import br.dev.edgard.easygamepad.protocol.GattProfile
@@ -49,24 +51,40 @@ data class ControllerDevice(
 }
 
 /** HID identity is explicitly linked to BLE identity by the user, never inferred from an Xbox name. */
+private fun InputPad.isSyntheticDemoInput(): Boolean =
+    id == GamepadInput.DEMO_PAD_ID || descriptor == "easygamepad:demo:input"
+
 fun controllerDevices(saved: List<SavedController>, pads: List<InputPad>, runtimeLinks: Map<String, Int> = emptyMap(),
     inputNames: Map<String, String> = emptyMap(), sessionNames: Map<String, String> = emptyMap()): List<ControllerDevice> {
+    val physicalPads = pads.filter { !it.isSyntheticDemoInput() }
     val result = saved.map { controller ->
-        val candidates = pads.filter { it.descriptor == controller.inputDescriptor }
-        val useOnlyInput = saved.size == 1 && pads.size == 1 && controller.inputDescriptor == null && !runtimeLinks.containsKey(controller.address)
+        val candidates = physicalPads.filter { it.descriptor == controller.inputDescriptor }
+        val useOnlyInput = saved.size == 1 && physicalPads.size == 1 && controller.inputDescriptor == null &&
+            !runtimeLinks.containsKey(controller.address)
         val pad = if (runtimeLinks.containsKey(controller.address)) candidates.firstOrNull { it.id == runtimeLinks[controller.address] }
-            else candidates.singleOrNull() ?: if (useOnlyInput) pads.single() else null
+            else candidates.singleOrNull() ?: if (useOnlyInput) physicalPads.single() else null
         ControllerDevice("ble:${controller.address}", controller.name, controller.modelId, controller.address,
             pad?.id, controller.inputDescriptor, controller.gatt, automaticInput = useOnlyInput,
             inputBatteryPercent = pad?.batteryPercent, inputBatteryCharging = pad?.batteryCharging == true)
     }
     val linked = result.mapNotNull { it.inputId }.toSet()
-    return result + pads.filter { it.id !in linked }.map { pad ->
+    val listed = result + physicalPads.filter { it.id !in linked }.map { pad ->
         val unique = pad.descriptor.isNotBlank() && pads.count { it.descriptor == pad.descriptor } == 1
         val name = sessionNames["${pad.id}:${pad.descriptor}"] ?: inputNames[pad.descriptor].takeIf { unique } ?: pad.name
         ControllerDevice("hid:${pad.id}", name, inputId = pad.id, inputDescriptor = pad.descriptor,
             inputBatteryPercent = pad.batteryPercent, inputBatteryCharging = pad.batteryCharging)
     }
+    return listed
+}
+
+/** Adds the fixed demo entry after real devices; gameplay links only while the demo overlay is active. */
+fun appendDemoController(devices: List<ControllerDevice>, linkDemoInput: Boolean = false): List<ControllerDevice> {
+    if (devices.any { it.id == DemoController.ID }) return devices
+    val demo = DemoController.device().copy(
+        inputId = GamepadInput.DEMO_PAD_ID.takeIf { linkDemoInput },
+        inputDescriptor = "easygamepad:demo:input".takeIf { linkDemoInput },
+    )
+    return devices + demo
 }
 
 internal fun controllerName(value: String): String = value.trim().also {

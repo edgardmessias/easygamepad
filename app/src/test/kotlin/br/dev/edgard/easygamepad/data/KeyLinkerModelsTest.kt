@@ -42,7 +42,7 @@ class KeyLinkerModelsTest {
 
     @Test fun savedX20KeepsItsModelAndGatt() {
         val saved = SavedController("AA:BB:CC:DD:EE:20", DeviceProfile.X20_PRO.name, DeviceProfile.X20_PRO.id, gatt = DeviceProfile.X20_PRO.gatt)
-        val device = controllerDevices(listOf(saved), emptyList()).single()
+        val device = controllerDevices(listOf(saved), emptyList()).first { it.address == saved.address }
         assertEquals(DeviceProfile.X20_PRO.id, device.modelId)
         assertEquals(DeviceProfile.KEYLINKER_GATT, device.gatt)
         assertTrue(device.supportsKeyLinker)
