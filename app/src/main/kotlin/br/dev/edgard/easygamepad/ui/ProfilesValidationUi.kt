@@ -23,6 +23,8 @@ import br.dev.edgard.easygamepad.protocol.ProfileValidationIssue
     ProfileIssueKind.DUPLICATE_TURBO_KEY -> tr("Each turbo rule must target a different button.", "Cada regra de turbo deve usar um botão diferente.")
     ProfileIssueKind.TURBO_RATE -> tr("Turbo rate must be between 1 and 20 presses per second.", "A taxa de turbo deve ficar entre 1 e 20 pressionamentos por segundo.")
     ProfileIssueKind.INVALID_MAPPING -> tr("A button assignment points to an unsupported output.", "Uma atribuição aponta para uma função não suportada.")
+    ProfileIssueKind.DISABLED_REAR_CONFLICT ->
+        tr("A disabled paddle cannot also have a mapping or macro. Disable the paddle again or remove the macro.", "Um paddle desativado não pode ter mapeamento ou macro. Desative de novo o paddle ou remova a macro.")
 }
 
 @Composable fun ProfileValidationBanner(issues: List<ProfileValidationIssue>, modifier: Modifier = Modifier) {

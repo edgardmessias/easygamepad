@@ -11,30 +11,90 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import br.dev.edgard.easygamepad.protocol.*
 
-@Composable fun X10ApplyDialog(config: ControllerConfig, ready: Boolean, dismiss: () -> Unit, apply: () -> Unit) {
-    val plan = remember(config) { config.x10UploadPlan() }
-    fun keys(values: List<PadKey>) = values.joinToString { it.label }
-    AlertDialog(onDismissRequest = dismiss,
+@Composable
+fun X10ApplyDialog(config: ControllerConfig, ready: Boolean, dismiss: () -> Unit, apply: () -> Unit) {
+    val valid = remember(config) { config.profileIsValid() }
+    val plan = remember(config, valid) { if (valid) config.x10UploadPlan() else null }
+    val issues = remember(config) { config.profileValidationIssues() }
+    val macroByTrigger = remember(config) { config.macros.associateBy { it.trigger } }
+    AlertDialog(
+        onDismissRequest = dismiss,
         title = { Text(tr("Apply this setup?", "Aplicar esta configuração?")) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(config.name, style = MaterialTheme.typography.titleMedium)
-                Description(tr("Keep your X10 nearby while the app sends and reads back the settings.",
-                    "Mantenha seu X10 por perto enquanto o app envia e relê os ajustes."))
-                Text(tr("Button assignments sent: ${plan.assignedMappings.size}", "Atribuições de botões enviadas: ${plan.assignedMappings.size}"))
-                plan.assignedMappings.forEach { (from, to) -> Text("${from.label} → ${to.label}") }
-                Text(tr("Standard outputs restored: ${plan.restoredMappings.size}", "Funções padrão restauradas: ${plan.restoredMappings.size}"))
-                if (plan.omittedMappings.isNotEmpty()) Description(tr("Assignments not sent: ", "Atribuições não enviadas: ") + keys(plan.omittedMappings))
-                Text(tr("Macros sent: ", "Macros enviadas: ") + if (plan.macroTriggers.isEmpty()) tr("None", "Nenhuma") else keys(plan.macroTriggers))
-                Text(tr("Turbo rules sent: ", "Regras de turbo enviadas: ") + if (plan.turboKeys.isEmpty()) tr("None", "Nenhuma") else keys(plan.turboKeys))
-                Description(tr("Stick and trigger ranges, axis inversion and both motor intensities are also sent.",
-                    "Faixas dos analógicos e gatilhos, inversão de eixos e intensidades dos dois motores também são enviadas."))
-                InfoBanner(tr("Omitted entries are not erase requests. Existing onboard macros, turbo rules or assignments may remain. No deletion command is sent.",
-                    "Entradas ausentes não são pedidos de exclusão. Macros, regras de turbo ou atribuições existentes podem permanecer no controle. Nenhum comando de exclusão é enviado."))
-                Description(tr("Read-back can check buttons, sticks, triggers, vibration and turbo. Macro sequences and persistence after power-off are not checked.",
-                    "A releitura pode conferir botões, analógicos, gatilhos, vibração e turbo. As sequências de macro e a persistência após desligar não são verificadas."))
+                if (!valid) {
+                    Text(
+                        issues.firstOrNull()?.localizedMessage()
+                            ?: tr("Fix profile errors before applying.", "Corrija os erros do perfil antes de aplicar."),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                } else if (plan != null) {
+                    Text(
+                        tr(
+                            "Your configured settings in this profile will be sent to the X10.",
+                            "Os ajustes que você configurou neste perfil serão enviados ao X10.",
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    if (!ready) {
+                        Text(
+                            tr(
+                                "Connect your X10 in configuration mode to apply.",
+                                "Conecte seu X10 no modo de configuração para aplicar.",
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    DeviceProfile.X10.rearButtons.forEach { paddle ->
+                        x10RearPaddleSummaryLine(paddle, config, plan, macroByTrigger)?.let { line ->
+                            val cleared = paddle in plan.clearedPaddles
+                            Text(
+                                line,
+                                style = if (cleared) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodyMedium,
+                                color = if (cleared) MaterialTheme.colorScheme.error else LocalContentColor.current,
+                            )
+                        }
+                    }
+                    if (plan.omittedMappings.isNotEmpty()) {
+                        Text(
+                            tr(
+                                "Buttons and paddles you did not configure here stay as they are on the controller.",
+                                "Botões e paddles que você não configurou aqui permanecem como estão no controle.",
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
         },
-        confirmButton = { TextButton(onClick = apply, enabled = ready) { Text(tr("Apply setup", "Aplicar configuração")) } },
-        dismissButton = { TextButton(onClick = dismiss) { Text(tr("Cancel", "Cancelar")) } })
+        confirmButton = {
+            TextButton(onClick = apply, enabled = ready && valid) { Text(tr("Apply", "Aplicar")) }
+        },
+        dismissButton = { TextButton(onClick = dismiss) { Text(tr("Cancel", "Cancelar")) } },
+    )
+}
+
+@Composable
+private fun x10RearPaddleSummaryLine(
+    paddle: PadKey,
+    config: ControllerConfig,
+    plan: X10UploadPlan,
+    macroByTrigger: Map<PadKey, Macro>,
+): String? {
+    if (paddle in plan.clearedPaddles) {
+        return tr("${paddle.label}: disabled", "${paddle.label}: desativado")
+    }
+    val macro = macroByTrigger[paddle]
+    if (macro != null && macro.steps.isNotEmpty()) {
+        return "${paddle.label}: ${tr("Macro", "Macro")}"
+    }
+    if (paddle in config.mappings && paddle !in config.disabledRearPaddles && macro == null) {
+        val target = config.mappings.getValue(paddle)
+        return "${paddle.label} → ${target.label}"
+    }
+    return null
 }

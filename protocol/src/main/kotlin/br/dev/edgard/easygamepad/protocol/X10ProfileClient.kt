@@ -10,7 +10,7 @@ import kotlinx.coroutines.withTimeout
 
 enum class X10SettingField { BUTTONS, STICKS, TRIGGERS, VIBRATION, TURBO }
 
-/** Only fields exposed by queries 119 and 80 can be checked; macros and persistence are outside this result. */
+/** Result of apply with read-back over queries 119, 80 and paddle macro slots (121). */
 sealed interface X10ApplyResult {
     data class Matched(val settings: ControllerSettings) : X10ApplyResult
     data class Mismatch(val settings: ControllerSettings, val fields: Set<X10SettingField>) : X10ApplyResult
@@ -20,7 +20,17 @@ sealed interface X10ApplyResult {
 /** Compare effective settings: the X10 can omit unchanged button mappings and reorder turbo entries. */
 fun ControllerSettings.differences(config: ControllerConfig): Set<X10SettingField> = buildSet {
     fun customMappings(values: Map<PadKey, PadKey>) = values.filterNot { (from, to) -> from in PadKey.outputs && from == to }
-    if (customMappings(mappings) != customMappings(config.mappings)) add(X10SettingField.BUTTONS)
+    val rearButtons = DeviceProfile.X10.rearButtons.toSet()
+    val deviceRear = mappings.filterKeys { it in rearButtons }
+    val draftRear = config.mappings.filterKeys { it in rearButtons }
+    val faceDevice = customMappings(mappings.filterKeys { it !in rearButtons })
+    val faceDraft = customMappings(config.mappings.filterKeys { it !in rearButtons })
+    if (faceDevice != faceDraft || deviceRear != draftRear) add(X10SettingField.BUTTONS)
+    val rearTriggers = rearButtons.toSet()
+    val deviceRearMacros = macros.filter { it.trigger in rearTriggers }.associateBy { it.trigger }
+    val draftRearMacros = config.macros.filter { it.trigger in rearTriggers }.associateBy { it.trigger }
+    if (deviceRearMacros != draftRearMacros) add(X10SettingField.BUTTONS)
+    if (disabledRearPaddles != config.disabledRearPaddles) add(X10SettingField.BUTTONS)
     if (leftStick != config.leftStick || rightStick != config.rightStick) add(X10SettingField.STICKS)
     if (leftTrigger != config.leftTrigger || rightTrigger != config.rightTrigger) add(X10SettingField.TRIGGERS)
     if (leftVibration != config.leftVibration || rightVibration != config.rightVibration) add(X10SettingField.VIBRATION)
@@ -33,11 +43,21 @@ class X10ProfileClient(private val session: CommandSession) {
         val pages = SettingsPages()
         var settings: ControllerSettings? = null
         session.request(119, bytes(2, 1)) { raw -> pages.accept(raw).also { settings = it } != null }
-        progress(.6f)
-        val mappings = MappingPages()
-        var outputs: Map<PadKey, PadKey>? = null
-        session.request(80, bytes(1)) { raw -> mappings.accept(raw).also { outputs = it } != null }
-        return requireNotNull(settings).copy(mappings = requireNotNull(outputs)).also { progress(1f) }
+        progress(.5f)
+        val mappingPages = MappingPages()
+        var faceMappings: Map<PadKey, PadKey>? = null
+        session.request(80, bytes(1)) { raw -> mappingPages.accept(raw).also { faceMappings = it } != null }
+        progress(.85f)
+        val macroPages = MacroSubPages()
+        var macroBlob: ByteArray? = null
+        session.request(121, bytes(1, 1)) { raw -> macroPages.accept(raw).also { macroBlob = it } != null }
+        val slots = macroBlob?.let { X10PaddleMacroCodec.parseContent(it) }.orEmpty()
+        val merged = X10PaddleMacroCodec.mergeFromSlots(faceMappings.orEmpty(), slots)
+        return requireNotNull(settings).copy(
+            mappings = merged.mappings,
+            macros = merged.macros,
+            disabledRearPaddles = merged.disabledRearPaddles,
+        ).also { progress(1f) }
     }
 
     suspend fun apply(config: ControllerConfig, uploadMode: (Boolean) -> Unit = {}, progress: (Float) -> Unit = {}): X10ApplyResult {
@@ -59,10 +79,10 @@ class X10ProfileClient(private val session: CommandSession) {
                 val fields = settings.differences(config)
                 if (fields.isEmpty()) X10ApplyResult.Matched(settings) else X10ApplyResult.Mismatch(settings, fields)
             } catch (timeout: TimeoutCancellationException) {
-                X10ApplyResult.Unconfirmed("Settings read-back timed out")
+                X10ApplyResult.Unconfirmed(X10ApplyReadBackDiagnostics.TIMED_OUT)
             } catch (cancel: CancellationException) { throw cancel }
             catch (error: Exception) {
-                X10ApplyResult.Unconfirmed(error.message ?: "Settings read-back failed")
+                X10ApplyResult.Unconfirmed(error.message ?: X10ApplyReadBackDiagnostics.FAILED)
             }
         } finally {
             withContext(NonCancellable) {

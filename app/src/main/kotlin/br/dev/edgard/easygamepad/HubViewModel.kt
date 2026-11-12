@@ -259,6 +259,15 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     private fun editorWorkspaceKey(): String = selectedId.value ?: LOCAL_EDITOR_WORKSPACE_KEY
     fun captureEditorBinding(): EditorSaveBinding =
         EditorSaveBinding(editorGeneration, editorWorkspaceKey(), savedProfileId.value)
+    fun captureEditorConfirmBinding(): EditorConfirmBinding =
+        EditorConfirmBinding(captureEditorBinding(), draftEpoch)
+    fun editorConfirmBindingMatches(binding: EditorConfirmBinding): Boolean =
+        binding.matchesActive(
+            editorGeneration,
+            editorWorkspaceKey(),
+            savedProfileId.value,
+            draftEpoch,
+        )
     private fun replaceEditorDraft(config: ControllerConfig, linkedSavedProfileId: String?) {
         editorGeneration++
         draftEpoch++

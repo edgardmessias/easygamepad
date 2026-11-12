@@ -76,9 +76,14 @@ class BleClient(private val context: Context, private val scope: CoroutineScope)
     fun log(direction: String, message: String) {
         mutableLogs.update { (it + BleLog(direction = direction, message = message)).takeLast(200) }
         if (BuildConfig.DEBUG) {
-            val summary = if (direction == "RX" || direction == "TX") "${message.split(' ').size} bytes" else
-                message.replace(Regex("(?i)(?:[0-9a-f]{2}:){5}[0-9a-f]{2}"), "<controller>")
-            android.util.Log.d("EasyGamepad", "$direction $summary")
+            val frame = message.trim().split(Regex("\\s+"))
+            val krly = if ((direction == "RX" || direction == "TX") && frame.size >= 2) {
+                val cmd = frame.getOrNull(1)?.toIntOrNull(16)
+                if (cmd != null) " cmd=$cmd bytes=${frame.size}" else "${frame.size} bytes"
+            } else if (direction == "RX" || direction == "TX") "${frame.size} bytes"
+            else message.replace(Regex("(?i)(?:[0-9a-f]{2}:){5}[0-9a-f]{2}"), "<controller>")
+            val tag = if (direction == "RX" || direction == "TX") "EasyGamepad-BLE" else "EasyGamepad"
+            android.util.Log.i(tag, "$direction $krly hex=$message")
         }
     }
     fun clearLogs() { mutableLogs.value = emptyList() }

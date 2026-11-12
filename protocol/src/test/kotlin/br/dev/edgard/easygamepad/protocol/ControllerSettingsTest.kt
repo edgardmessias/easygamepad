@@ -30,7 +30,7 @@ class ControllerSettingsTest {
         assertEquals(listOf(Turbo(PadKey.A, true, 12)), result.turbos)
     }
     @Test fun mergingReadbackPreservesLocalNameAndMacroSequences() {
-        val macro = Macro(steps = listOf(MacroStep(PadKey.B)))
+        val macro = Macro(PadKey.M3, steps = listOf(MacroStep(PadKey.B)))
         val draft = ControllerConfig(name = "Racing", macros = listOf(macro))
         val result = ControllerSettings.decode(content).copy(mappings = mapOf(PadKey.M1 to PadKey.X)).mergeInto(draft)
         assertEquals("Racing", result.name); assertEquals(listOf(macro), result.macros)

@@ -114,6 +114,25 @@ import kotlinx.coroutines.withContext
     var readDialog by remember { mutableStateOf(false) }
     var loadDialog by remember { mutableStateOf<SavedProfile?>(null) }
     var deleteDialog by remember { mutableStateOf<String?>(null) }
+    var rearMapOverMacro by remember { mutableStateOf<RearRemapOverMacroPending?>(null) }
+    var pendingMacroReplace by remember { mutableStateOf<RearMacroReplacePending?>(null) }
+    val editorConfirmGeneration = remember(draft, savedProfileId) { model.captureEditorConfirmBinding() }
+    LaunchedEffect(editorConfirmGeneration, pendingMacroReplace) {
+        pendingMacroReplace?.let { pending ->
+            val matches = model.editorConfirmBindingMatches(pending.binding)
+            if (!matches || rearMacroReplaceDialogConflict(draft, pending, matches) == null) {
+                pendingMacroReplace = null
+            }
+        }
+    }
+    LaunchedEffect(editorConfirmGeneration, rearMapOverMacro) {
+        rearMapOverMacro?.let { pending ->
+            val matches = model.editorConfirmBindingMatches(pending.binding)
+            if (!matches || !rearRemapOverMacroDialogStillOpen(draft, pending, matches)) {
+                rearMapOverMacro = null
+            }
+        }
+    }
     var exportSnapshot by remember { mutableStateOf<ControllerConfig?>(null) }
     val validationIssues = remember(draft) { draft.profileValidationIssues() }
     val draftValid = validationIssues.isEmpty()
@@ -260,6 +279,7 @@ import kotlinx.coroutines.withContext
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             pair.forEach { source ->
                                 val target = draft.mappings[source]
+                                val outputKind = draft.buttonsListOutputKind(source)
                                 Surface(onClick = { keyPicker = source }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
                                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -268,8 +288,29 @@ import kotlinx.coroutines.withContext
                                         }
                                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                             HubIcon(Glyph.ARROW, Modifier.size(14.dp), MaterialTheme.colorScheme.onSurfaceVariant)
-                                            Text(target?.label ?: tr("Not sent", "Não enviado"), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge,
-                                                color = if (target != null && target != source) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text(
+                                                when (outputKind) {
+                                                    ButtonsListOutputKind.Disabled -> tr("Disabled", "Desativado")
+                                                    ButtonsListOutputKind.Mapping -> requireNotNull(target).label
+                                                    ButtonsListOutputKind.Macro -> tr("Macro", "Macro")
+                                                    ButtonsListOutputKind.NotSent -> if (source in DeviceProfile.X10.rearButtons) {
+                                                        tr("Unchanged", "Inalterado")
+                                                    } else {
+                                                        tr("Not sent", "Não enviado")
+                                                    }
+                                                },
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                style = MaterialTheme.typography.labelLarge,
+                                                color = when (outputKind) {
+                                                    ButtonsListOutputKind.Disabled -> MaterialTheme.colorScheme.error
+                                                    ButtonsListOutputKind.Mapping ->
+                                                        if (target != source) MaterialTheme.colorScheme.primary
+                                                        else MaterialTheme.colorScheme.onSurfaceVariant
+                                                    ButtonsListOutputKind.Macro -> MaterialTheme.colorScheme.primary
+                                                    ButtonsListOutputKind.NotSent -> MaterialTheme.colorScheme.onSurfaceVariant
+                                                },
+                                            )
                                         }
                                     }
                                 }
@@ -280,8 +321,10 @@ import kotlinx.coroutines.withContext
                 }
                 TextButton(onClick = { model.edit { it.copy(mappings = it.mappings + PadKey.outputs.associateWith { key -> key }) } }) { Text(tr("Restore default button functions", "Restaurar funções originais dos botões")) }
                 ProfileHelp(tr("About missing assignments", "Sobre atribuições ausentes"),
-                    tr("An unlisted assignment is not sent and does not request deletion. Existing assignments may remain on the X10. Restoring a standard button sends its own output explicitly.",
-                        "Uma atribuição ausente não é enviada e não solicita exclusão. As atribuições existentes podem permanecer no X10. Restaurar um botão padrão envia sua própria função explicitamente."))
+                    tr(
+                        "Face buttons you do not change here are not sent and do not erase the controller. Rear paddles (M1/M2) shown as unchanged are not sent either—the controller keeps its current setup. Disabled paddles are sent so the paddle does nothing.",
+                        "Botões da frente que você não altera aqui não são enviados e não apagam o controle. Paddles traseiros (M1/M2) marcados como inalterados também não são enviados — o controle mantém a configuração atual. Paddles desativados são enviados para o botão não fazer nada.",
+                    ))
             }
             1 -> {
                 StickEditor(tr("Left stick", "Analógico esquerdo"), draft.leftStick) { value -> model.edit { it.copy(leftStick = value) } }
@@ -297,7 +340,13 @@ import kotlinx.coroutines.withContext
                     tr("Choose where each trigger begins responding and reaches full output.",
                         "Escolha onde cada gatilho começa a responder e atinge o valor máximo."))
             }
-            3 -> MacroEditor(draft.macros) { value -> model.edit { it.copy(macros = value) } }
+            3 -> MacroEditor(draft.macros) { value ->
+                if (draft.rearPaddlesNeedingMacroConfirm(value).isEmpty()) {
+                    model.edit { it.withRearMacros(value) }
+                } else {
+                    pendingMacroReplace = RearMacroReplacePending(model.captureEditorConfirmBinding(), value)
+                }
+            }
             4 -> TurboEditor(draft.turbos) { value -> model.edit { it.copy(turbos = value) } }
             else -> HubCard(Modifier.fillMaxWidth()) {
                 Text(tr("Feel every moment.", "Sinta cada momento."), style = MaterialTheme.typography.titleLarge)
@@ -365,13 +414,74 @@ import kotlinx.coroutines.withContext
         }
     }
     keyPicker?.let { source -> KeyPicker(tr("Output for ", "Função para ") + source.label, PadKey.outputs, onDismiss = { keyPicker = null },
-        clearLabel = if (source in PadKey.outputs) tr("Restore standard output", "Restaurar função padrão") else tr("Do not send assignment", "Não enviar atribuição"),
-        onClear = { model.edit { it.copy(mappings = if (source in PadKey.outputs) it.mappings + (source to source) else it.mappings - source) }; keyPicker = null }) { target ->
-        model.edit { it.copy(mappings = it.mappings + (source to target)) }; keyPicker = null
+        clearLabel = if (source in PadKey.outputs) tr("Restore standard output", "Restaurar função padrão") else tr("Disable paddle", "Desativar paddle"),
+        onClear = {
+            model.edit {
+                if (source in PadKey.outputs) it.copy(mappings = it.mappings + (source to source))
+                else it.withRearPaddleDisabled(source)
+            }
+            keyPicker = null
+        },
+    ) { target ->
+        if (source in DeviceProfile.X10.rearButtons && draft.rearHasMacro(source)) {
+            rearMapOverMacro = RearRemapOverMacroPending(model.captureEditorConfirmBinding(), source, target)
+        } else if (source in DeviceProfile.X10.rearButtons) {
+            model.edit { it.withRearRemap(source, target) }
+            keyPicker = null
+        } else {
+            model.edit { it.copy(mappings = it.mappings + (source to target)) }
+            keyPicker = null
+        }
     } }
+    rearMapOverMacro?.let { pending ->
+        if (rearRemapOverMacroDialogStillOpen(draft, pending, model.editorConfirmBindingMatches(pending.binding))) {
+            val source = pending.source
+            val target = pending.target
+            ConfirmDialog(
+                tr("Replace macro?", "Substituir macro?"),
+                tr(
+                    "${source.label} has a macro in this profile. Mapping it to ${target.label} removes that macro.",
+                    "${source.label} tem uma macro neste perfil. Mapeá-lo para ${target.label} remove essa macro.",
+                ),
+                tr("Use mapping", "Usar mapeamento"),
+                onDismiss = { rearMapOverMacro = null },
+                onConfirm = {
+                    if (rearRemapOverMacroDialogStillOpen(draft, pending, model.editorConfirmBindingMatches(pending.binding))) {
+                        model.edit { it.withRearRemap(pending.source, pending.target) }
+                        keyPicker = null
+                    }
+                    rearMapOverMacro = null
+                },
+            )
+        }
+    }
+    pendingMacroReplace?.let { pending ->
+        val conflict = rearMacroReplaceDialogConflict(draft, pending, model.editorConfirmBindingMatches(pending.binding))
+        if (conflict != null) {
+            val (paddle, mappedTo) = conflict
+            ConfirmDialog(
+                tr("Replace button mapping?", "Substituir mapeamento de botão?"),
+                tr(
+                    "${paddle.label} is mapped to ${mappedTo.label}. Saving a macro on this paddle removes that mapping.",
+                    "${paddle.label} está mapeado para ${mappedTo.label}. Salvar uma macro neste paddle remove esse mapeamento.",
+                ),
+                tr("Use macro", "Usar macro"),
+                onDismiss = { pendingMacroReplace = null },
+                onConfirm = {
+                    val live = pendingMacroReplace
+                    if (live != null &&
+                        rearMacroReplaceDialogConflict(draft, live, model.editorConfirmBindingMatches(live.binding)) != null
+                    ) {
+                        model.edit { it.withRearMacros(live.nextMacros) }
+                    }
+                    pendingMacroReplace = null
+                },
+            )
+        }
+    }
     if (readDialog) ConfirmDialog(tr("Read current settings?", "Ler configurações atuais?"),
-        tr("Replace the profile you are editing with the settings on your X10? Save first if you want to keep your edits. The profile name and macro sequences will be kept.",
-            "Substituir o perfil em edição pelos ajustes do seu X10? Salve antes se quiser guardar suas alterações. O nome do perfil e as sequências de macro serão mantidos."),
+        tr("Replace the profile you are editing with the settings on your X10? Save first if you want to keep your edits. The profile name is kept; rear paddles come from onboard macro slots.",
+            "Substituir o perfil em edição pelos ajustes do seu X10? Salve antes se quiser guardar suas alterações. O nome do perfil é mantido; paddles traseiros vêm dos slots de macro do controle."),
         ConsumerCopy.readFromX10Action(LocalPortuguese.current), { readDialog = false }) { readDialog = false; model.readController() }
     applySnapshot?.let { snapshot ->
         X10ApplyDialog(snapshot, editorUi.configurationReady,

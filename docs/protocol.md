@@ -28,6 +28,9 @@ or [validation limits](#evidence-and-validation-limits).
 | [ControllerSettings.kt](../protocol/src/main/kotlin/br/dev/edgard/easygamepad/protocol/ControllerSettings.kt) | Settings pages and length-delimited sections |
 | [CommandSession.kt](../protocol/src/main/kotlin/br/dev/edgard/easygamepad/protocol/CommandSession.kt) | Serialized requests, matching, ACKs and events |
 | [BleClient.kt](../app/src/main/kotlin/br/dev/edgard/easygamepad/ble/BleClient.kt) | Android discovery, subscriptions, chunk writes and connection lifecycle |
+| [X10PaddleMacros.kt](../protocol/src/main/kotlin/br/dev/edgard/easygamepad/protocol/X10PaddleMacros.kt) | Rear paddle slot decode, merge, editor transitions and clear encoding |
+| [X10UploadPlan.kt](../protocol/src/main/kotlin/br/dev/edgard/easygamepad/protocol/X10UploadPlan.kt) | Ordered X10 upload: rear slots on command 58, face mappings on 61 |
+| [X10ProfileClient.kt](../protocol/src/main/kotlin/br/dev/edgard/easygamepad/protocol/X10ProfileClient.kt) | Upload, read-back over queries 119/80/121 and apply comparison |
 | [ControllerRepository.kt](../app/src/main/kotlin/br/dev/edgard/easygamepad/data/ControllerRepository.kt) | Feature operations and profile application order |
 
 The examples below use unsigned hexadecimal bytes. Array offsets are zero-based;
@@ -125,8 +128,9 @@ Payload bytes in this table exclude length, command ID and sequence.
 | 65 / `41` | Start self-calibration | Empty | ACK; result later through event 67 or 73 |
 | 66 / `42` | Stop self-calibration | Empty | ACK |
 | 69 / `45` | X10 motor test | Selected side and intensity; see below | ACK; physical effect checked separately |
-| 80 / `50` | Query mappings | `01` | Mapping pages |
+| 80 / `50` | Query mappings | `01` | Mapping pages (face buttons; rear may appear) |
 | 119 / `77` | Query settings | `02 01` | Settings pages with selector `02` |
+| 121 / `79` | Query macro sub-pages | `01 01` | Paddle macro slot blob (M1–M4 in wire format) |
 | 120 / `78` | Stick / trigger calibration | Action, type | Async progress and result |
 | 132 / `84` | Query version information | `01 00` | Firmware response |
 
@@ -257,6 +261,63 @@ A synthetic two-page example from the tests:
 The content is `06 00 01 A0 00 A1 A2`: M1 → A and B → X. The final `09` and `0A`
 in their respective frames are sequence bytes, excluded from content.
 
+Query 80 can still list M1/M2 remaps, but **`X10ProfileClient` treats query 121
+as authoritative for rear paddles**. When a slot in the 121 blob is cleared,
+disabled, a passthrough remap or a multi-step macro, it overrides any matching
+M1/M2 entry from query 80 during merge.
+
+### Macro sub-pages: 121 / `79`
+
+First request: `05 79 01 01 00` (payload `01 01`).
+
+```text
+[length, 79, finalPage, currentPage, pageContent..., sequence]
+```
+
+`MacroSubPages` uses the same consecutive-page rules as mapping query 80, with
+command byte `121` (`0x79`). Concatenate `raw[4 .. length−1)` from each page.
+
+The combined blob is a sequence of **paddle slots**. Each slot begins with a
+7-byte header:
+
+| Header offset | Field |
+| --- | --- |
+| 0 | Trigger code (M1–M4: `01`–`04`) |
+| 1 | Repeat flag (inverted: `00` repeat, `01` play once) |
+| 2–5 | Not interpreted by the current decoder |
+| 6 | Step count (`00` cleared/disabled, `01` passthrough or macro) |
+
+For a positive step count, step records follow: step index, hold (16-bit BE),
+delay (16-bit BE), key count, then key bytes. The compact fixture below stores
+the output key directly in the key-count position instead.
+**`X10PaddleMacroCodec`** classifies
+each slot:
+
+- **Empty / cleared** (`step count 0`, or one step with zero keys): adds the
+  trigger to `disabledRearPaddles`.
+- **Passthrough** (one step, hold `0`, delay `0`–`1`, one output key): rear remap
+  `trigger → key` (the compact factory fixture decodes with delay `1`).
+- **Macro** (any other non-empty pattern): converted to a `Macro` for that trigger.
+
+The codec walks the blob sequentially; if a header cannot be parsed it advances
+one byte. Truncated blobs stop without hanging (see tests). For malformed step
+headers it accepts **compact** key lists (`keyCount > 8`) and a **legacy**
+single-byte fallback when the key list would run past the buffer.
+
+Factory passthrough examples from
+[`X10PaddleMacroTest`](../protocol/src/test/kotlin/br/dev/edgard/easygamepad/protocol/X10PaddleMacroTest.kt):
+
+```text
+01 01 00 00 00 00 01 00 00 00 00 01 A0   # M1 → A (play once)
+02 01 00 00 00 00 01 00 00 00 00 01 A1   # M2 → B
+```
+
+Cleared slot (disabled paddle), header only:
+
+```text
+01 01 00 00 00 00 00                     # M1 disabled (7 bytes total)
+```
+
 ### Settings query: 119 / `77`
 
 First request: `05 77 02 01 00`.
@@ -296,10 +357,17 @@ After excluding headers and sequence bytes, the sections are:
 02 64 64                       # both motors: 100
 ```
 
-The app reads command 119, then command 80, before merging the result into the
-draft. The merge replaces mappings, sticks, triggers, vibration and turbo.
-It preserves the local profile name and macro sequences. Neither query recovers
-those sequences, so this is a partial hardware-settings read, not a full backup.
+The app reads command **119**, then **80**, then **121**, before merging the
+result into the draft. Query 119 supplies sticks, triggers, vibration and turbo.
+Query 80 supplies face-button mappings. Query 121 supplies **M1/M2** remaps,
+rear-paddle macros and disabled-paddle state; `mergeFromSlots` merges face plus
+rear mappings and drops stale M1/M2 rows from query 80 when 121 disagrees.
+
+`ControllerSettings.mergeInto` replaces mappings, ranges, vibration, turbo, rear
+macros and `disabledRearPaddles`, while keeping the local profile name and any
+**M3/M4** macro sequences still present only in the draft (the X10 UI edits
+physical M1/M2 only; the model allows M1–M4 for import/validation). This is still
+not a guaranteed full backup of every onboard rule across power cycles.
 
 ## Firmware information
 
@@ -327,38 +395,59 @@ hardware `0100A0`. The firmware field here has four bytes, unlike legacy command
 Each line below is an independent encoding example with sequence `00`:
 
 ```text
-05 3D 01 A0 00                         # map M1 to A
-0B 3E 05 5A 01 00 03 5F 00 01 00      # sticks: left 5..90/invert X; right 3..95/invert Y
-0B 3A 02 00 00 01 2C 03 E8 A2 00      # M2 repeat, step 0: X held 300 ms, wait 1000 ms
+0B 3A 01 01 00 00 00 00 00 A0 00         # M1 play-once passthrough to A (cmd 58)
+0B 3A 02 00 00 01 2C 03 E8 A2 00         # M2 repeat, step 0: X held 300 ms, wait 1000 ms
+0B 3E 05 5A 01 00 03 5F 00 01 00         # sticks: left 5..90/invert X; right 3..95/invert Y
+05 3D A1 A0 00                           # map B to A (cmd 61; face buttons only)
+0A 3A 01 01 00 00 00 00 00 00            # disable / clear M1 slot (7-byte payload)
 ```
+
+Rear paddles **do not** use command 61. Sending `61` with M1/M2 as the source
+duplicated face-button output in early testing
+([issue #3](https://github.com/edgardmessias/easygamepad/issues/3)); the
+implemented route overwrites each rear **macro slot** with command **58**
+instead. Simple M1/M2 remaps use `KrlyCodec.rearPaddlePassthrough` (8-byte
+payload matching the factory passthrough frame). Explicit disable / cleared slots
+use `X10PaddleMacroCodec.clearStep` (**7 bytes**: `[trigger, 1, 0, 0, 0, 0, 0]`).
+Multi-step rear macros use the usual command 58 macro-step encoding. Do not assume
+an 8-byte clear variant; only the 7-byte clear encoding is implemented and tested.
 
 The app validates the complete `ControllerConfig` before uploading and sends
 commands in this order, awaiting each ACK:
 
 1. Command 1 with `10`: enter editing mode.
 2. Command 54 with `00 00`: initialize the upload.
-3. Command 58 for every macro step, in list order.
+3. Command 58 for macro steps in profile list order, followed by M1/M2
+   passthrough remaps or clear/disable writes as applicable.
 4. Command 55 for each turbo entry.
 5. Command 57 for the trigger ranges, then 62 for the sticks.
-6. Command 61 for each mapping.
+6. Command 61 for remaining mappings, with physical M1/M2 sources excluded.
+   M3/M4 model/import support does not establish hardware support on the X10.
 7. Command 53 for both motor intensities. This stores the two levels; it does not pulse the motors. See [Motor vibration](#motor-vibration).
 8. Command 52 with no payload: end/commit the upload.
 9. Command 1 with `00`: restore normal mode.
-10. Queries 119 and 80: read settings and mappings back before reporting the result.
+10. Queries **119**, **80** and **121**: read back and merge before reporting.
+
+`X10UploadPlan` omits face and rear assignments that are absent from the draft;
+those omissions **leave onboard state untouched**. **`disabledRearPaddles`** and
+explicit rear remaps/macros **do** generate command 58 writes, including the
+7-byte clear pattern, which disables the paddle on the controller.
 
 `X10ProfileClient` reports `Matched`, `Mismatch` (with the differing field groups),
 or `Unconfirmed` when the upload was accepted but read-back failed. Comparison
-covers buttons, sticks, triggers, motor intensity and turbo. It normalizes omitted
-identity mappings and ignores turbo ordering, while retaining unexpected mappings
-and turbo rules as differences. A match does not verify macro sequences or
-persistence after power-off. Only a match records a successful read-back timestamp.
-See [the physical validation procedure](x10-readback-validation.md) for test status.
+covers face and rear button mappings, **M1/M2 rear macros**, **`disabledRearPaddles`**,
+sticks, triggers, motor intensity and turbo. It normalizes omitted identity
+mappings and ignores turbo ordering. A match compares **readable configuration**,
+not physical macro playback, repeat timing, or persistence after power-off. Only
+a match records a successful read-back timestamp. See
+[X10 read-back validation](x10-readback-validation.md) for automated and limited
+hardware evidence.
 
 Upload stops on the first failure. Cleanup attempts to restore normal mode when
 the link remains ready, including after rejection or cancellation. There is no
 transaction or rollback; earlier writes may already have taken effect. Omitting
-a previously uploaded macro, turbo or rear mapping is not documented as a proven
-erase operation. Factory reset uses its separate command 5 with payload `00`.
+a face mapping, turbo or unconfigured rear paddle does not erase an existing onboard
+rule. Factory reset uses its separate command 5 with payload `00`.
 
 ## Calibration and async events
 

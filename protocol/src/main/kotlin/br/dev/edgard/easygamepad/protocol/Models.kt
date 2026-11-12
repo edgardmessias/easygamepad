@@ -87,7 +87,7 @@ data class Turbo(val key: PadKey = PadKey.A, val automatic: Boolean = false, val
 }
 data class ControllerConfig(
     val name: String = "X10",
-    val mappings: Map<PadKey, PadKey> = PadKey.outputs.associateWith { it },
+    val mappings: Map<PadKey, PadKey> = emptyMap(),
     val leftStick: StickSettings = StickSettings(),
     val rightStick: StickSettings = StickSettings(),
     val leftTrigger: TriggerSettings = TriggerSettings(),
@@ -95,6 +95,8 @@ data class ControllerConfig(
     val leftVibration: Int = 70, val rightVibration: Int = 70,
     val macros: List<Macro> = emptyList(),
     val turbos: List<Turbo> = emptyList(),
+    /** Rear paddles the user cleared; upload sends an empty macro slot (cmd 58). */
+    val disabledRearPaddles: Set<PadKey> = emptySet(),
 ) {
     fun validate() {
         require(name.isNotBlank() && name.length <= 40)
@@ -103,6 +105,8 @@ data class ControllerConfig(
         require(mappings.values.all { it in PadKey.outputs })
         require(macros.map { it.trigger }.distinct().size == macros.size)
         require(turbos.map { it.key }.distinct().size == turbos.size)
+        require(disabledRearPaddles.all { it in DeviceProfile.X10.rearButtons })
+        require(disabledRearPaddles.none { it in mappings || macros.any { m -> m.trigger == it } })
         macros.forEach { it.validate() }; turbos.forEach { it.validate() }
     }
 }

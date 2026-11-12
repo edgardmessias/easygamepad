@@ -173,8 +173,8 @@ class ControllerRepository internal constructor(
     }?.also {
         mutableState.update { s -> s.copy(progress = 1f, settingsReadAt = System.currentTimeMillis()) }
         notice(
-            "Read from X10: buttons, sticks, triggers, vibration and turbo. Macro sequences kept from your draft.",
-            "Lido do X10: botões, analógicos, gatilhos, vibração e turbo. Sequências de macro mantidas do rascunho.",
+            "Read from X10: face mappings, M1/M2 settings, sticks, triggers, vibration and turbo.",
+            "Lido do X10: mapeamentos da frente, ajustes M1/M2, analógicos, gatilhos, vibração e turbo.",
         )
     }
     suspend fun readVersions() = runOperation {
@@ -223,7 +223,7 @@ class ControllerRepository internal constructor(
             appliedAt = now.takeIf { result is X10ApplyResult.Matched },
             settingsReadAt = if (result is X10ApplyResult.Unconfirmed) it.settingsReadAt else now) }
         log("READBACK", when (result) {
-            is X10ApplyResult.Matched -> "X10 readable settings match; macros and power-cycle persistence not checked"
+            is X10ApplyResult.Matched -> "X10 readable settings match read-back; power-cycle persistence not checked"
             is X10ApplyResult.Mismatch -> "X10 settings mismatch: ${result.fields.joinToString()}"
             is X10ApplyResult.Unconfirmed -> "X10 settings unconfirmed: ${result.reason}"
         })

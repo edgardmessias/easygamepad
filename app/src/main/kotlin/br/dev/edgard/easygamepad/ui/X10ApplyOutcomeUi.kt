@@ -36,13 +36,37 @@ fun X10ApplyOutcomeCard(
         X10ApplyOutcomeKind.MISMATCH -> tr("Apply read-back differed", "Releitura diferiu do envio")
         X10ApplyOutcomeKind.UNCONFIRMED -> tr("Apply result unconfirmed", "Resultado do envio não confirmado")
     }
+    val unconfirmedDetail = x10UnconfirmedReasonForUi(presentation.unconfirmedReason)
     val summary = when (presentation.kind) {
-        X10ApplyOutcomeKind.MATCHED -> tr("Buttons, sticks, triggers, vibration and turbo match the controller read-back.",
-            "Botões, analógicos, gatilhos, vibração e turbo conferem na releitura do controle.")
+        X10ApplyOutcomeKind.MATCHED -> tr(
+            "Buttons (including M1/M2 when sent), sticks, triggers, vibration and turbo match the controller read-back.",
+            "Botões (incluindo M1/M2 quando enviados), analógicos, gatilhos, vibração e turbo conferem na releitura do controle.",
+        )
         X10ApplyOutcomeKind.MISMATCH -> tr("These groups differed: ${presentation.mismatchedFields.joinToString { fieldLabel(it) }}. Your draft was not changed.",
             "Estes grupos diferiram: ${presentation.mismatchedFields.joinToString { fieldLabel(it) }}. Seu rascunho não foi alterado.")
-        X10ApplyOutcomeKind.UNCONFIRMED -> tr("Commands were accepted, but settings could not be read back: ${presentation.unconfirmedReason ?: ""}",
-            "Os comandos foram aceitos, mas não foi possível reler os ajustes: ${presentation.unconfirmedReason ?: ""}")
+        X10ApplyOutcomeKind.UNCONFIRMED -> tr(
+            "Commands were accepted, but settings could not be read back because $unconfirmedDetail.",
+            "Os comandos foram aceitos, mas não foi possível reler os ajustes porque $unconfirmedDetail.",
+        )
+    }
+    val rearDetail = when {
+        !presentation.readBackCompleted -> tr(
+            "M1/M2 could not be verified because the read-back did not finish.",
+            "M1/M2 não puderam ser verificados porque a releitura não terminou.",
+        )
+        !presentation.rearConfigSent -> tr(
+            "M1/M2 were not sent or cleared. Their existing controller settings were included in the read-back comparison.",
+            "M1/M2 não foram enviados nem desativados. Os ajustes existentes no controle entraram na comparação da releitura.",
+        )
+        presentation.kind == X10ApplyOutcomeKind.MISMATCH &&
+            X10SettingField.BUTTONS in presentation.mismatchedFields -> tr(
+            "M1/M2 or other button settings differ from the read-back. See details above. Power-off persistence was not verified.",
+            "M1/M2 ou outros ajustes de botões diferem da releitura. Veja os detalhes acima. A persistência após desligar não foi verificada.",
+        )
+        else -> tr(
+            "M1/M2 settings sent in this apply match the read-back. Power-off persistence was not verified.",
+            "Os ajustes de M1/M2 enviados neste envio conferem na releitura. A persistência após desligar não foi verificada.",
+        )
     }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(tr("Last apply to X10", "Última aplicação ao X10"), style = MaterialTheme.typography.titleSmall)
@@ -58,10 +82,16 @@ fun X10ApplyOutcomeCard(
                 if (presentation.matchedFields.isNotEmpty() && presentation.kind == X10ApplyOutcomeKind.MISMATCH) {
                     Description(tr("Matched: ", "Conferiram: ") + presentation.matchedFields.joinToString { fieldLabel(it) })
                 }
-                presentation.fieldNotes.forEach { (field, note) ->
-                    Text("${fieldLabel(field)}: $note", style = MaterialTheme.typography.bodySmall)
+                val readBack = presentation.readBackSettings
+                if (readBack != null) {
+                    presentation.mismatchedFields.forEach { field ->
+                        Text(
+                            "${fieldLabel(field)}: ${localizedMismatchFieldNote(field, requested, readBack, presentation.buttonsMismatch)}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                 }
-                Description(tr("Macro sequences and persistence after power-off were not verified.", "As sequências de macro e a persistência após desligar não foram verificadas."))
+                Description(rearDetail)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = onReadFromDevice) { Text(tr("Read from X10", "Trazer do X10")) }
                 }

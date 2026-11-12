@@ -26,7 +26,7 @@ fun MacroEditor(macros: List<Macro>, change: (List<Macro>) -> Unit) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(macro.trigger.label, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
                     TextButton(onClick = { change(macros.filterIndexed { i, _ -> i != index }) }) {
-                        Text(tr("Remove paddle", "Remover botão"))
+                        Text(tr("Remove macro", "Remover macro"))
                     }
                 }
                 val summary = macro.sequenceSummary()
@@ -60,7 +60,9 @@ fun MacroEditor(macros: List<Macro>, change: (List<Macro>) -> Unit) {
                 ) { Text(tr("Add step", "Adicionar etapa")) }
             }
         }
-        val available = listOf(PadKey.M1, PadKey.M2).filter { key -> macros.none { it.trigger == key } }
+        val available = listOf(PadKey.M1, PadKey.M2).filter { key ->
+            macros.none { it.trigger == key }
+        }
         if (available.isNotEmpty()) {
             Eyebrow(tr("Add a paddle sequence", "Adicionar sequência traseira"))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -81,8 +83,8 @@ fun MacroEditor(macros: List<Macro>, change: (List<Macro>) -> Unit) {
         ProfileHelp(
             tr("Removing macros", "Remover macros"),
             tr(
-                "Removing a macro from the profile omits its upload. That is not a delete command on the controller.",
-                "Remover uma macro do perfil omite o envio. Isso não é um comando de exclusão no controle.",
+                "Removing a rear macro disables that paddle in the profile and sends an empty macro slot when you apply, so the paddle does nothing on the controller.",
+                "Remover uma macro traseira desativa esse paddle no perfil e envia um slot de macro vazio ao aplicar, para o paddle não fazer nada no controle.",
             ),
         )
     }

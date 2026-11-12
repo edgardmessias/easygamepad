@@ -13,7 +13,9 @@ class X10UploadPlanTest {
         assertTrue(PadKey.M2 in plan.omittedMappings)
         assertTrue(PadKey.X in plan.omittedMappings)
         val writes = plan.commands.filter { it.first == 61 }.map { it.second.map(Byte::u8) }
-        assertEquals(listOf(listOf(160, 160), listOf(161, 162), listOf(1, 163)), writes)
+        assertEquals(listOf(listOf(160, 160), listOf(161, 162)), writes)
+        assertTrue(plan.macroTriggers.isEmpty())
+        assertTrue(plan.commands.any { it.first == 58 })
     }
 
     @Test fun removingRulesFromTheProfileNeverInventsAnEraseCommand() {
@@ -28,10 +30,20 @@ class X10UploadPlanTest {
         assertTrue(PadKey.M1 in removed.omittedMappings)
     }
 
-    @Test fun defaultsRestoreRegularOutputsWithoutPretendingToClearRearButtons() {
+    @Test fun defaultDraftOmitsButtonWritesUnlessUserAddsAssignments() {
         val plan = ControllerConfig().x10UploadPlan()
-        assertEquals(PadKey.outputs.toSet(), plan.restoredMappings.keys)
-        assertEquals(DeviceProfile.X10.rearButtons, plan.omittedMappings)
+        assertTrue(plan.restoredMappings.isEmpty())
         assertTrue(plan.assignedMappings.isEmpty())
+        assertEquals(PadKey.outputs + DeviceProfile.X10.rearButtons, plan.omittedMappings)
+        assertTrue(plan.commands.none { it.first == 61 })
+    }
+
+    @Test fun onlyRearRemapUploadsMacroStepNotMappingCommand() {
+        val plan = ControllerConfig(mappings = mapOf(PadKey.M1 to PadKey.Y)).x10UploadPlan()
+        assertEquals(mapOf(PadKey.M1 to PadKey.Y), plan.assignedMappings)
+        assertTrue(plan.commands.none { it.first == 61 })
+        assertEquals(1, plan.commands.count { it.first == 58 })
+        assertTrue(plan.macroTriggers.isEmpty())
+        assertArrayEquals(bytes(1, 1, 0, 0, 0, 0, 0, 163), plan.commands.single { it.first == 58 }.second)
     }
 }

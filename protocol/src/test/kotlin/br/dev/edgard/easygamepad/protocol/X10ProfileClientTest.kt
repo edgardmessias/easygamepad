@@ -34,6 +34,42 @@ class X10ProfileClientTest {
                     Turbo(requireNotNull(PadKey.from(payload[0].u8())), payload[1].u8() == 1, payload[2].u8()))
                 57 -> config = config.copy(leftTrigger = TriggerSettings(payload[0].u8(), payload[1].u8()),
                     rightTrigger = TriggerSettings(payload[2].u8(), payload[3].u8()))
+                58 -> {
+                    val trigger = PadKey.from(payload[0].u8()) ?: return
+                    if (payload.size == 7) {
+                        config = config.copy(
+                            mappings = config.mappings - trigger,
+                            macros = config.macros.filterNot { it.trigger == trigger },
+                            disabledRearPaddles = config.disabledRearPaddles + trigger,
+                        )
+                    } else if (payload.size >= 8 &&
+                        payload[3].u8() == 0 && payload[4].u8() == 0 && payload[5].u8() == 0 && payload[6].u8() == 0
+                    ) {
+                        val key = PadKey.from(payload[7].u8()) ?: return
+                        config = config.copy(
+                            mappings = config.mappings.filterKeys { it != trigger } + (trigger to key),
+                            macros = config.macros.filterNot { it.trigger == trigger },
+                            disabledRearPaddles = config.disabledRearPaddles - trigger,
+                        )
+                    } else if (payload.size >= 8) {
+                        val hold = (payload[3].u8() shl 8) or payload[4].u8()
+                        val delay = (payload[5].u8() shl 8) or payload[6].u8()
+                        val key = requireNotNull(PadKey.from(payload[7].u8()))
+                        val step = MacroStep(key, hold, delay)
+                        val index = payload[2].u8()
+                        val existing = config.macros.firstOrNull { it.trigger == trigger }
+                        val steps = (existing?.steps ?: emptyList()).toMutableList().also {
+                            while (it.size <= index) it += MacroStep()
+                            it[index] = step
+                        }.filter { it.key in PadKey.outputs }
+                        val macro = Macro(trigger, payload[1].u8() == 0, steps)
+                        config = config.copy(
+                            mappings = config.mappings - trigger,
+                            macros = config.macros.filterNot { it.trigger == trigger } + macro,
+                            disabledRearPaddles = config.disabledRearPaddles - trigger,
+                        )
+                    }
+                }
                 61 -> config = config.copy(mappings = config.mappings + (requireNotNull(PadKey.from(payload[0].u8())) to requireNotNull(PadKey.from(payload[1].u8()))))
                 62 -> config = config.copy(leftStick = StickSettings(payload[0].u8(), payload[1].u8(), payload[2].u8() == 1, payload[3].u8() == 1),
                     rightStick = StickSettings(payload[4].u8(), payload[5].u8(), payload[6].u8() == 1, payload[7].u8() == 1))
@@ -52,9 +88,30 @@ class X10ProfileClientTest {
                 }
                 80 -> {
                     if (answerMappings) {
-                        val entries = config.mappings.filterNot { it.key == it.value }.flatMap { (from, to) -> listOf(0, from.code, to.code) }.toIntArray()
-                        incoming.emit(encoder.encode(80, bytes(1, 1, entries.size) + bytes(*entries)))
+                        val face = config.mappings.filterKeys { it in PadKey.outputs }
+                        val entries = face.filterNot { it.key == it.value }.flatMap { (from, to) -> listOf(0, from.code, to.code) }.toIntArray()
+                        val body = if (entries.isEmpty()) bytes(0) else bytes(entries.size) + bytes(*entries)
+                        incoming.emit(encoder.encode(80, bytes(1, 1) + body))
                     }
+                    return
+                }
+                121 -> {
+                    if (!answerMappings) return
+                    val blob = DeviceProfile.X10.rearButtons.flatMap { rear ->
+                        when {
+                            rear in config.disabledRearPaddles -> listOf(rear.code, 1, 0, 0, 0, 0, 0)
+                            else -> config.macros.firstOrNull { it.trigger == rear }?.let { macro ->
+                                listOf(rear.code, if (macro.repeat) 0 else 1, 0, 0, 0, 0, macro.steps.size) +
+                                    macro.steps.flatMapIndexed { index, step ->
+                                        listOf(index, step.holdMs shr 8, step.holdMs and 255, step.delayMs shr 8,
+                                            step.delayMs and 255, 1, step.key.code)
+                                    }
+                            } ?: config.mappings[rear]?.let { key ->
+                                listOf(rear.code, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, key.code)
+                            } ?: emptyList()
+                        }
+                    }.toIntArray()
+                    incoming.emit(encoder.encode(121, bytes(1, 1) + bytes(*blob)))
                     return
                 }
             }
@@ -68,7 +125,7 @@ class X10ProfileClientTest {
         val config = ControllerConfig(
             leftVibration = 25,
             rightVibration = 35,
-            mappings = ControllerConfig().mappings + (PadKey.M1 to PadKey.A),
+            mappings = mapOf(PadKey.M1 to PadKey.A),
             turbos = listOf(Turbo(PadKey.B, automatic = true, rate = 10)),
         )
         val planned = config.x10UploadPlan().commands.map { it.first }
@@ -78,7 +135,7 @@ class X10ProfileClientTest {
         assertEquals(1, opcodes.first())
         assertEquals(54, opcodes[1])
         assertEquals(planned, opcodes.subList(2, 2 + planned.size))
-        assertEquals(listOf(1, 119, 80), opcodes.takeLast(3))
+        assertEquals(listOf(1, 119, 80, 121), opcodes.takeLast(4))
     }
 
     @Test fun applyStartsWithEditingModeBeforeFeatureWrites() = runTest {
@@ -88,7 +145,7 @@ class X10ProfileClientTest {
             ControllerConfig(
                 leftVibration = 25,
                 rightVibration = 35,
-                mappings = ControllerConfig().mappings + (PadKey.M1 to PadKey.A),
+                mappings = mapOf(PadKey.M1 to PadKey.A),
                 turbos = listOf(Turbo(PadKey.B, automatic = true, rate = 10)),
             ),
         )
@@ -96,7 +153,8 @@ class X10ProfileClientTest {
         assertEquals(1, pad.requests.first()[1].u8())
         assertTrue(pad.requests.any { it[1].u8() == 54 })
         assertTrue(pad.requests.any { it[1].u8() == 53 })
-        assertTrue(pad.requests.any { it[1].u8() == 61 })
+        assertTrue(pad.requests.any { it[1].u8() == 58 }) // M1→A rear assignment uses macro slot, not cmd 61.
+        assertTrue(pad.requests.none { it[1].u8() == 61 })
         assertTrue(pad.requests.any { it[1].u8() == 119 })
         assertTrue(pad.requests.any { it[1].u8() == 80 })
     }
@@ -105,15 +163,15 @@ class X10ProfileClientTest {
         val pad = Pad()
         val client = X10ProfileClient(CommandSession(pad, backgroundScope))
         val profile = ControllerConfig(leftStick = StickSettings(5, 95, invertX = true), rightTrigger = TriggerSettings(4, 96),
-            leftVibration = 40, rightVibration = 80, mappings = ControllerConfig().mappings + (PadKey.M1 to PadKey.B),
+            leftVibration = 40, rightVibration = 80,
             turbos = listOf(Turbo(PadKey.A, true, 12)), macros = listOf(Macro(steps = listOf(MacroStep()))))
         val modes = mutableListOf<Boolean>()
         val progress = mutableListOf<Float>()
         val result = client.apply(profile, modes::add, progress::add)
         assertTrue(result is X10ApplyResult.Matched)
         assertEquals(listOf(true, false), modes)
-        assertEquals(listOf(1, 119, 80), pad.requests.takeLast(3).map { it[1].u8() })
-        assertEquals(0, pad.requests[pad.requests.lastIndex - 2][2].u8())
+        assertEquals(listOf(1, 119, 80, 121), pad.requests.takeLast(4).map { it[1].u8() })
+        assertEquals(0, pad.requests[pad.requests.lastIndex - 3][2].u8())
         assertEquals(1f, progress.last())
         assertTrue(progress.zipWithNext().all { (from, to) -> to >= from })
         val settings = (result as X10ApplyResult.Matched).settings
@@ -178,8 +236,7 @@ class X10ProfileClientTest {
     }
 
     @Test fun comparisonsNormalizeIdentityMappingsAndTurboOrderWithoutCheckingLocalFields() {
-        val config = ControllerConfig(turbos = listOf(Turbo(PadKey.A), Turbo(PadKey.B)),
-            macros = listOf(Macro(steps = listOf(MacroStep()))))
+        val config = ControllerConfig(turbos = listOf(Turbo(PadKey.A), Turbo(PadKey.B)))
         val settings = ControllerSettings(config.leftTrigger, config.rightTrigger, config.leftStick, config.rightStick,
             config.leftVibration, config.rightVibration, config.turbos.reversed())
         assertTrue(settings.differences(config).isEmpty())

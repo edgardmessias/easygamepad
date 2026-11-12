@@ -17,6 +17,7 @@ enum class ProfileIssueKind {
     DUPLICATE_TURBO_KEY,
     TURBO_RATE,
     INVALID_MAPPING,
+    DISABLED_REAR_CONFLICT,
 }
 
 data class ProfileValidationIssue(val field: ProfileField, val kind: ProfileIssueKind, val index: Int? = null)
@@ -30,6 +31,18 @@ fun ControllerConfig.profileValidationIssues(): List<ProfileValidationIssue> = b
     runCatching { rightTrigger.validate() }.onFailure { add(ProfileValidationIssue(ProfileField.RIGHT_TRIGGER, ProfileIssueKind.TRIGGER_RANGE)) }
     if (leftVibration !in 0..100 || rightVibration !in 0..100) add(ProfileValidationIssue(ProfileField.VIBRATION, ProfileIssueKind.VIBRATION_RANGE))
     if (mappings.values.any { it !in PadKey.outputs }) add(ProfileValidationIssue(ProfileField.MAPPINGS, ProfileIssueKind.INVALID_MAPPING))
+    val x10Rear = DeviceProfile.X10.rearButtons.toSet()
+    disabledRearPaddles.filter { it !in x10Rear }.forEach {
+        add(ProfileValidationIssue(ProfileField.MAPPINGS, ProfileIssueKind.DISABLED_REAR_CONFLICT))
+    }
+    x10Rear.forEach { rear ->
+        if (rear in mappings && macros.any { it.trigger == rear }) {
+            add(ProfileValidationIssue(ProfileField.MAPPINGS, ProfileIssueKind.INVALID_MAPPING))
+        }
+        if (rear in disabledRearPaddles && (rear in mappings || macros.any { it.trigger == rear })) {
+            add(ProfileValidationIssue(ProfileField.MAPPINGS, ProfileIssueKind.DISABLED_REAR_CONFLICT))
+        }
+    }
     if (macros.map { it.trigger }.distinct().size != macros.size) add(ProfileValidationIssue(ProfileField.MACROS, ProfileIssueKind.DUPLICATE_MACRO_TRIGGER))
     macros.forEachIndexed { index, macro ->
         when {

@@ -12,13 +12,20 @@ data class ControllerSettings(
     val rightVibration: Int,
     val turbos: List<Turbo>,
     val mappings: Map<PadKey, PadKey> = emptyMap(),
+    val macros: List<Macro> = emptyList(),
+    val disabledRearPaddles: Set<PadKey> = emptySet(),
 ) {
-    // Macro sequences and the profile name are outside this query's coverage.
-    fun mergeInto(draft: ControllerConfig) = draft.copy(
-        mappings = mappings, leftTrigger = leftTrigger, rightTrigger = rightTrigger,
-        leftStick = leftStick, rightStick = rightStick,
-        leftVibration = leftVibration, rightVibration = rightVibration, turbos = turbos,
-    )
+    fun mergeInto(draft: ControllerConfig): ControllerConfig {
+        val rear = DeviceProfile.X10.rearButtons.toSet()
+        val keepMacros = draft.macros.filter { it.trigger !in rear }
+        return draft.copy(
+            mappings = mappings, leftTrigger = leftTrigger, rightTrigger = rightTrigger,
+            leftStick = leftStick, rightStick = rightStick,
+            leftVibration = leftVibration, rightVibration = rightVibration, turbos = turbos,
+            macros = keepMacros + macros,
+            disabledRearPaddles = disabledRearPaddles,
+        )
+    }
 
     companion object {
         fun decode(content: ByteArray): ControllerSettings {

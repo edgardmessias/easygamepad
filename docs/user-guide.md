@@ -131,18 +131,26 @@ controller during the app session; save or export work you want to keep.
 Tap **Read from X10**, beside the draft name, and confirm **Read from X10**.
 Save your draft first if you want to keep its existing values.
 
-The read replaces **mappings, stick ranges and axis inversion, trigger ranges,
-motor intensities and turbo entries**. It preserves the local **profile name and
-macro sequences**, which are outside this read's coverage. A read is therefore
-not a complete backup of every onboard setting.
+The read replaces **face mappings, M1/M2 rear remaps, rear-paddle macros,
+disabled-paddle state**, stick ranges and axis inversion, trigger ranges, motor
+intensities and turbo entries. It keeps the local **profile name** and any **M3/M4**
+macro sequences present only in the draft model (the X10 editor works with
+physical M1/M2). A read is not a complete backup of every onboard rule, and it
+does not prove persistence after power-off.
 
 ### Buttons
 
 Tap a button in the illustration to choose its output. Switch to **Back** for M1
 and M2, or scroll to **Show button list** for a list editor. **Restore standard
-output** restores a regular button in the draft; **Do not send assignment** removes a
-rear-button mapping from the draft so it is omitted from the next apply. **Restore default button functions** restores
-the standard outputs in the draft.
+output** restores a regular button in the draft. M1/M2 without a mapping, macro
+or disabled state are omitted on apply, leaving the controller's current slot
+untouched. **Disable paddle** marks M1 or M2
+disabled in the draft; apply sends an explicit clear so the paddle produces no
+output. A paddle cannot carry both a rear remap and a macro: assigning one after
+the other opens a confirmation because the change replaces the existing setup.
+Cancel leaves the draft unchanged. If you switch profiles, rename the draft or
+edit elsewhere while a confirmation is open, the pending dialog is discarded when
+its captured draft revision no longer matches.
 
 <img src="images/buttons.png" width="300" alt="Button editor with the X10 illustration and the Save profile and Apply to X10 action bar">
 
@@ -170,7 +178,9 @@ in **Test** to understand your controller's current trigger mode.
 Choose **+ M1** or **+ M2** to add a rear-paddle sequence. Each step has one button,
 a **Hold (ms)** duration and a **Wait (ms)** duration. Add up to 32 steps per paddle;
 use the step's button picker, move-up action or remove action to edit it.
-**Repeat sequence** changes the repeat setting in the draft.
+**Repeat sequence** changes the repeat setting in the draft. **Remove macro**
+marks that paddle **disabled** in the draft, but you can
+assign a new remap or macro afterward without leaving the editor.
 
 Hold duration must be 1–65,535 ms; wait duration can be 0–65,535 ms. A sequence
 needs at least one valid step before the profile can be saved or applied.
@@ -227,8 +237,10 @@ There is no automatic rollback.
 A controller acknowledgment confirms a command response, not persistence after
 power-off. Verify the behavior in **Test**, read back supported settings, and
 check again after restarting the controller when persistence matters. Omitted
-mappings, macros or turbo entries are not sent as erase commands; onboard rules
-may remain until you replace them explicitly. See
+face mappings, unconfigured rear paddles and omitted turbo entries are not sent as
+erase commands; onboard rules may remain until you replace them explicitly.
+**Disable paddle** and explicit M1/M2 remaps or macros are sent and participate in
+read-back comparison. See
 [X10 read-back validation](x10-readback-validation.md) for what apply compares after upload.
 
 The write and calibration paths are implemented, but complete physical validation
@@ -239,7 +251,8 @@ of every setting, removal behavior and persistence remains outstanding.
 Use **Export profile** to keep a portable copy before uninstalling. Imports must
 use the current `easygamepad-profile` format, version 1, for `easysmx-x10`.
 Renamed or older format identifiers are not accepted by the current importer.
-See the [file format](development.md#profile-file-format) for a complete example.
+Older exports without **`disabledRearPaddles`** still import; the field defaults
+to none disabled. See the [file format](development.md#profile-file-format) for a complete example.
 
 Saved profiles and preferences stay on this phone. Android backup is disabled;
 uninstalling removes local data. Loading or deleting a saved profile requires

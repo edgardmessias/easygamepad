@@ -122,16 +122,19 @@ support for unrelated controllers or firmware.
 profiles in the Preferences DataStore named `easy_gamepad`. Draft edits are not
 automatically durable saved profiles.
 
-Readback first collects settings using command 119, then mappings using command
-80. The complete result replaces draft mapping, range, inversion, vibration and
-turbo fields. The local name and macro sequences remain. A read failure does not
-merge a partial result into the draft.
+Readback uses `X10ProfileClient.readSettings`: command **119** (sticks, triggers,
+vibration, turbo), **80** (face mappings) and **121** (M1/M2 paddle slots).
+`ControllerSettings.mergeInto` replaces mappings, ranges, vibration, turbo,
+rear M1/M2 macros and `disabledRearPaddles`, while keeping the local profile
+name and any **M3/M4** macro entries that exist only in the draft model. A read
+failure does not merge a partial result into the draft.
 
-Applying an X10 profile also reads queries 119 and 80 after returning to normal
-mode. `X10ProfileClient` compares the readable fields and returns a match,
-mismatch or unconfirmed result; ACKs alone do not count as a read-back match.
-This check leaves the local draft intact. Macro sequences and power-cycle
-persistence remain outside its coverage. See [X10 read-back validation](x10-readback-validation.md).
+Applying an X10 profile also reads queries 119, 80 and 121 after normal mode.
+`X10ProfileClient` compares face mappings, rear M1/M2 remaps and macros,
+disabled paddles, sticks, triggers, vibration and turbo, then returns matched,
+mismatch or unconfirmed. ACKs alone do not count as a read-back match. This check
+leaves the local draft intact. Physical playback and power-cycle persistence
+remain outside its coverage. See [X10 read-back validation](x10-readback-validation.md).
 
 The current importer accepts only the exact format/version/device tuple below.
 Do not infer compatibility from historical product names. Android backup is
@@ -163,10 +166,15 @@ example is valid for the current importer:
     "leftVibration": 70,
     "rightVibration": 70,
     "macros": [],
-    "turbos": []
+    "turbos": [],
+    "disabledRearPaddles": []
   }
 }
 ```
+
+`disabledRearPaddles` is optional on import: profiles without it decode with an
+empty set. Exports always include the array (possibly empty) for M1/M2 paddles
+marked **Disable paddle** in the editor.
 
 Optional entries within the required `macros` and `turbos` arrays have these shapes:
 
@@ -194,7 +202,8 @@ that applying the profile clears old rules on the controller.
 | Profile name | Nonblank, up to 40 characters |
 | Stick / trigger ranges | Min 0–99, max 1–100, min < max |
 | Motor intensity | 0–100 |
-| Macro arrays | Up to 4 unique M1–M4 triggers in the model; UI adds physical M1/M2 |
+| Macro arrays | Up to 4 unique M1–M4 triggers in the model; X10 UI and read-back use M1/M2 |
+| Disabled rear paddles | Optional JSON array of `M1`/`M2` names; import accepts absence |
 | Macro steps | 1–32 per sequence; hold 1–65,535 ms, wait 0–65,535 ms |
 | Turbo arrays | Up to 16 unique output keys, rate 1–20 |
 | Output keys | Regular `PadKey` outputs; M1–M4 are not output targets |

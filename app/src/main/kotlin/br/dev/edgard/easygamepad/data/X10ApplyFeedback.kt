@@ -7,8 +7,8 @@ import br.dev.edgard.easygamepad.protocol.X10SettingField
 
 fun x10ApplyNotice(result: X10ApplyResult): Notice = when (result) {
     is X10ApplyResult.Matched -> Notice(
-        "Buttons, sticks, triggers, vibration and turbo match the read-back. Macro sequences and persistence after power-off were not checked.",
-        "Botões, analógicos, gatilhos, vibração e turbo conferem na releitura. As sequências de macro e a persistência após desligar não foram verificadas.",
+        "Applied settings match the controller read-back. Power-off persistence was not verified.",
+        "Os ajustes enviados conferem na releitura do controle. A persistência após desligar não foi verificada.",
         kind = NoticeKind.OUTCOME,
     )
     is X10ApplyResult.Mismatch -> {

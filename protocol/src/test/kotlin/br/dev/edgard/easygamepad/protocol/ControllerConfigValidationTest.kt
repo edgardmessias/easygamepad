@@ -42,6 +42,14 @@ class ControllerConfigValidationTest {
         assertTrue(issues.any { it.kind == ProfileIssueKind.MACRO_STEP })
     }
 
+    @Test fun disabledPaddleConflictsWithMappingOrMacro() {
+        val conflict = ControllerConfig(
+            disabledRearPaddles = setOf(PadKey.M1),
+            macros = listOf(Macro(steps = listOf(MacroStep()))),
+        )
+        assertTrue(conflict.profileValidationIssues().any { it.kind == ProfileIssueKind.DISABLED_REAR_CONFLICT })
+    }
+
     @Test fun validateThrowsMatchStructuredIssues() {
         val config = ControllerConfig(name = "")
         assertFalse(config.profileIsValid())

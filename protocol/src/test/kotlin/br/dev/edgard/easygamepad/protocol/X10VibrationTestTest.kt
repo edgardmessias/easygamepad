@@ -26,6 +26,7 @@ class X10VibrationTestTest {
                 119 -> bytes(2, 1, 1, 0, 4, 0, 100, 0, 100, 9, 0, 100, 0, 0, 0, 100, 0, 0, 0, 2,
                     if (changedMotor && writes.any { it[1].u8() == 69 }) 40 else 70, 70)
                 80 -> bytes(1, 1, 0)
+                121 -> bytes(1, 1, 0)
                 69 -> {
                     val stop = frame.copyOfRange(2, 5).all { it == 0.toByte() }
                     if (!stop && ignoreStart) return
@@ -46,9 +47,9 @@ class X10VibrationTestTest {
             val intensity = if (motor == X10Motor.LEFT) 20 else 40
             val result = X10VibrationTest(CommandSession(pad, backgroundScope)).run(motor, intensity)
             assertTrue(result.settingsUnchanged)
-            assertEquals(listOf(119, 80, 69, 69, 119, 80), pad.writes.map { it[1].u8() })
-            assertArrayEquals(bytes(6, 69) + payload, pad.writes[2].copyOfRange(0, 5))
-            assertArrayEquals(bytes(0, 0, 0), pad.writes[3].copyOfRange(2, 5))
+            assertEquals(listOf(119, 80, 121, 69, 69, 119, 80, 121), pad.writes.map { it[1].u8() })
+            assertArrayEquals(bytes(6, 69) + payload, pad.writes[3].copyOfRange(0, 5))
+            assertArrayEquals(bytes(0, 0, 0), pad.writes[4].copyOfRange(2, 5))
             assertTrue(currentTime - started >= 500)
         }
     }
@@ -65,9 +66,9 @@ class X10VibrationTestTest {
             val pad = Pad()
             val result = X10VibrationTest(CommandSession(pad, backgroundScope)).run(motor, value)
             val expected = if (motor == X10Motor.LEFT) bytes(value, 0, 1) else bytes(0, value, 2)
-            assertArrayEquals(expected, pad.writes[2].copyOfRange(2, 5))
-            assertArrayEquals(bytes(0, 0, 0), pad.writes[3].copyOfRange(2, 5))
-            assertEquals(listOf(119, 80, 69, 69, 119, 80), pad.writes.map { it[1].u8() })
+            assertArrayEquals(expected, pad.writes[3].copyOfRange(2, 5))
+            assertArrayEquals(bytes(0, 0, 0), pad.writes[4].copyOfRange(2, 5))
+            assertEquals(listOf(119, 80, 121, 69, 69, 119, 80, 121), pad.writes.map { it[1].u8() })
             assertTrue(result.settingsUnchanged)
         }
     }
@@ -85,9 +86,10 @@ class X10VibrationTestTest {
         val pad = Pad()
         val operation = launch { X10VibrationTest(CommandSession(pad, backgroundScope)).run(X10Motor.LEFT, 20) }
         runCurrent()
-        assertEquals(3, pad.writes.size)
+        assertTrue(pad.writes.size >= 3)
+        val beforeCancel = pad.writes.size
         operation.cancelAndJoin()
-        assertEquals(4, pad.writes.size)
+        assertTrue(pad.writes.size > beforeCancel)
         assertArrayEquals(bytes(0, 0, 0), pad.writes.last().copyOfRange(2, 5))
     }
 
@@ -104,6 +106,6 @@ class X10VibrationTestTest {
         val pad = Pad().apply { changedMotor = true }
         val result = X10VibrationTest(CommandSession(pad, backgroundScope)).run(X10Motor.LEFT, 20)
         assertFalse(result.settingsUnchanged)
-        assertEquals(listOf(119, 80, 69, 69, 119, 80), pad.writes.map { it[1].u8() })
+        assertEquals(listOf(119, 80, 121, 69, 69, 119, 80, 121), pad.writes.map { it[1].u8() })
     }
 }

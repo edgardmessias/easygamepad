@@ -16,8 +16,9 @@ controller settings.
 ## What you can do
 
 - **Test Android gamepads:** inspect live buttons, stick movement and trigger travel.
-- **Customize the X10:** remap buttons, adjust stick and trigger ranges, reverse
-  stick axes, build rear-paddle macros, configure turbo and set motor intensity.
+- **Customize the X10:** remap face and rear (M1/M2) buttons, build rear-paddle
+  macros or disable paddles, adjust stick and trigger ranges, reverse stick axes,
+  configure turbo and set motor intensity.
 - **Keep profiles:** save setups on your phone and import or export JSON files.
 - **Manage controllers:** switch between devices and give them local names.
 - **Maintain your X10:** follow calibration instructions, read version information

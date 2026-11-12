@@ -42,6 +42,7 @@ object ProfileExportCodec {
                     macro.steps.forEach { steps.put(JSONObject().put("key", it.key.name).put("holdMs", it.holdMs).put("delayMs", it.delayMs)) }
                 })) } })
             .put("turbos", JSONArray().also { array -> config.turbos.forEach { array.put(JSONObject().put("key", it.key.name).put("automatic", it.automatic).put("rate", it.rate)) } })
+            .put("disabledRearPaddles", JSONArray().also { array -> config.disabledRearPaddles.forEach { array.put(it.name) } })
     }
 
     fun decodeConfig(root: JSONObject): ControllerConfig {
@@ -82,6 +83,13 @@ object ProfileExportCodec {
                 val t = turbos.getJSONObject(i)
                 Turbo(PadKey.valueOf(t.getString("key")), t.getBoolean("automatic"), t.getInt("rate"))
             },
+            if (root.has("disabledRearPaddles")) {
+                root.getJSONArray("disabledRearPaddles").let { array ->
+                    buildSet {
+                        for (i in 0 until array.length()) add(PadKey.valueOf(array.getString(i)))
+                    }
+                }
+            } else emptySet(),
         )
     }
 }

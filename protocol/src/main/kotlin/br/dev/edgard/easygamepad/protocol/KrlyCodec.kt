@@ -92,6 +92,13 @@ object KrlyCodec {
         return bytes(macro.trigger.code, if (macro.repeat) 0 else 1, index,
             step.holdMs shr 8, step.holdMs and 255, step.delayMs shr 8, step.delayMs and 255, step.key.code)
     }
+
+    /** Overwrites the paddle macro slot (cmd 121); matches factory passthrough framing (hold/delay 0). */
+    fun rearPaddlePassthrough(trigger: PadKey, target: PadKey): ByteArray {
+        require(trigger.code in 1..4)
+        require(target in PadKey.outputs)
+        return bytes(trigger.code, 1, 0, 0, 0, 0, 0, target.code)
+    }
 }
 
 /** QueryMappingKeyReq uses page headers, with a length-prefixed list of triples. */

@@ -86,6 +86,10 @@ class KrlyCodecTest {
         assertArrayEquals(bytes(2, 0, 0, 1, 44, 3, 232, 162), KrlyCodec.macroStep(macro, 0))
         assertEquals(1, KrlyCodec.macroStep(macro.copy(repeat = false), 0)[1].u8())
     }
+    @Test fun rearPaddlePassthroughMatchesFactoryMacroFrame() {
+        assertArrayEquals(bytes(1, 1, 0, 0, 0, 0, 0, 160), KrlyCodec.rearPaddlePassthrough(PadKey.M1, PadKey.A))
+        assertArrayEquals(bytes(2, 1, 0, 0, 0, 0, 0, 163), KrlyCodec.rearPaddlePassthrough(PadKey.M2, PadKey.Y))
+    }
     @Test fun stickPayloadMatchesDocumentedAxisOrder() {
         assertArrayEquals(bytes(5, 90, 1, 0, 3, 95, 0, 1), KrlyCodec.sticks(StickSettings(5, 90, true, false), StickSettings(3, 95, false, true)))
     }
