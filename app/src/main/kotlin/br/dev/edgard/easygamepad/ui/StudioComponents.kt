@@ -120,16 +120,22 @@ import br.dev.edgard.easygamepad.input.InputState
                 maxLines = 2, overflow = TextOverflow.Ellipsis, minLines = 2)
         }
     }
+    val summary = AccessibilitySemantics.metricTileSummary(label, value, detail)
     if (onClick != null) Surface(
         onClick = onClick,
-        modifier = modifier.heightIn(min = 48.dp).semantics(mergeDescendants = true) { contentDescription = "$label, $value" },
+        modifier = modifier.heightIn(min = 48.dp).semantics(mergeDescendants = true) { contentDescription = summary },
         shape = RoundedCornerShape(18.dp),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         content = body,
     )
-    else Surface(modifier = modifier, shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), content = body)
+    else Surface(
+        modifier = modifier.semantics(mergeDescendants = true) { contentDescription = summary },
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        content = body,
+    )
 }
 
 @Composable fun FeatureTile(title: String, detail: String, glyph: Glyph, color: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {

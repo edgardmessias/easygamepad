@@ -19,6 +19,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import java.text.DateFormat
@@ -142,6 +144,7 @@ object ScreenLayout {
     connectLabel: String,
     connectingLabel: String,
     onConnect: () -> Unit,
+    connectDisabledReason: String? = null,
 ) {
     HubCard(Modifier.fillMaxWidth().animateContentSize()) {
         Text(title, style = MaterialTheme.typography.titleMedium)
@@ -149,7 +152,13 @@ object ScreenLayout {
         AnimatedVisibility(connecting, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
         }
-        Button(onClick = onConnect, enabled = connectEnabled && !connecting, modifier = Modifier.fillMaxWidth()) {
+        Button(
+            onClick = onConnect,
+            enabled = connectEnabled && !connecting,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).semantics {
+                connectDisabledReason?.let { stateDescription = it }
+            },
+        ) {
             Text(if (connecting) connectingLabel else connectLabel)
         }
     }
