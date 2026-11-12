@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
 import java.util.UUID
 
@@ -85,6 +86,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     private var connectingModel: String? = null
     private var reconnectJob: Job? = null
     private var disconnectJob: Job? = null
+    private var backgroundDisconnectJob: Job? = null
     private var manuallyDisconnected = false
     private var isForeground = false
     private val vibrationPreviewRequests = Channel<VibrationPreviewRequest>(Channel.CONFLATED)
@@ -357,9 +359,24 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
         isForeground = active
         reconnectJob?.cancel(); reconnectJob = null
         if (!active) {
-            disconnectJob = app.scope.launch { repository.disconnect() }
+            stopActiveVibrationPreview()
+            repository.stopX10VibrationPreviewAsync()
+            backgroundDisconnectJob?.cancel()
+            if (repository.needsBackgroundDisconnect()) {
+                disconnectJob = app.scope.launch { repository.disconnect() }
+            } else {
+                backgroundDisconnectJob = app.scope.launch {
+                    repository.backgroundDisconnectRequired().filter { it }.collect {
+                        disconnectJob?.join()
+                        repository.disconnect()
+                        cancel()
+                    }
+                }
+            }
             return
         }
+        backgroundDisconnectJob?.cancel()
+        backgroundDisconnectJob = null
         manuallyDisconnected = false
         reconnectJob = viewModelScope.launch {
             disconnectJob?.join()
@@ -372,11 +389,21 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
                 if (now >= inputRefreshAt) { app.input.refreshDevices(); inputRefreshAt = now + 30_000 }
                 val device = selectedDevice.value
                 if (device?.id != retryDevice) { retryDevice = device?.id; retryAt = 0; backoff = 5_000 }
-                if (!manuallyDisconnected && !switching.value && !deviceSheet.value && !connectionSheet.value && !ble.scanning.value &&
-                    ble.link.value.phase == LinkPhase.DISCONNECTED && ble.enabled() &&
-                    device?.hasConfigurationLink == true && !device.address.isNullOrBlank() && now >= retryAt) {
+                if (shouldRetryConfigurationConnect(
+                        manuallyDisconnected,
+                        switching.value,
+                        deviceSheet.value,
+                        connectionSheet.value,
+                        ble.scanning.value,
+                        ble.link.value.phase,
+                        ble.enabled(),
+                        device,
+                        now,
+                        retryAt,
+                    )) {
                     selectionRevision++
-                    runCatching { openLink(requireNotNull(device.address), device.gatt, device.profile ?: DeviceProfile.X10) }
+                    val target = requireNotNull(device)
+                    runCatching { openLink(requireNotNull(target.address), target.gatt, target.profile ?: DeviceProfile.X10) }
                         .onFailure { ble.log("RECONNECT", it.message ?: "Retry failed") }
                     retryAt = now + backoff + 18_000L
                     backoff = (backoff * 2).coerceAtMost(60_000L)
@@ -555,7 +582,12 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     private fun canPreviewX10Vibration() =
         selectedDevice.value?.isX10 == true && configurationTarget() && operationGate.canSwitchNow()
     override fun onCleared() {
+        backgroundDisconnectJob?.cancel()
         repository.stopX10VibrationPreviewAsync()
+        app.scope.launch {
+            disconnectJob?.join()
+            repository.disconnect()
+        }
         super.onCleared()
     }
     private sealed interface VibrationPreviewRequest {

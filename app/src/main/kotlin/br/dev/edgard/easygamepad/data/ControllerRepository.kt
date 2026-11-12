@@ -42,6 +42,7 @@ class ControllerRepository internal constructor(
     private var pollingJob: Job? = null
     private var calibrationTimeout: Job? = null
     private var macroMode = false
+    private val macroUploadActive = MutableStateFlow(false)
     private val exclusive = Mutex()
 
     private fun isCurrent(active: KrlyConnection): Boolean = connection === active && link.value.let {
@@ -214,7 +215,10 @@ class ControllerRepository internal constructor(
             check(!state.value.calibration.stopRequired)
             config.validate()
             val active = connected()
-            X10ProfileClient(active).apply(config, uploadMode = { macroMode = it }, progress = { progress ->
+            X10ProfileClient(active).apply(config, uploadMode = { active ->
+                macroMode = active
+                macroUploadActive.value = active
+            }, progress = { progress ->
                 mutableState.update { it.copy(progress = progress) }
             })
         } ?: return false
@@ -270,12 +274,28 @@ class ControllerRepository internal constructor(
         connected().ack(5, bytes(0))
         mutableState.update { it.copy(appliedAt = null) }
     }
+    fun needsBackgroundDisconnect(): Boolean = needsConfigurationDisconnectOnBackground(
+        link.value,
+        state.value.calibration.stopRequired,
+        macroUploadActive.value,
+    )
+
+    /** Late calibration or macro phases after Home may still require background cleanup. */
+    fun backgroundDisconnectRequired(): Flow<Boolean> = combine(
+        link,
+        state.map { it.calibration.stopRequired }.distinctUntilChanged(),
+        macroUploadActive,
+    ) { connection, calibrationStopRequired, macroActive ->
+        needsConfigurationDisconnectOnBackground(connection, calibrationStopRequired, macroActive)
+    }.distinctUntilChanged()
+
     suspend fun disconnect() {
         if (state.value.calibration.stopRequired && link.value.phase == LinkPhase.READY) stopCalibration()
         if (macroMode && link.value.phase == LinkPhase.READY) {
             runCatching { withTimeout(5500) { connection?.session?.ack(1, bytes(0)) } }
         }
         macroMode = false
+        macroUploadActive.value = false
         onDisconnect()
     }
 }
