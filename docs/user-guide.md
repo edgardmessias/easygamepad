@@ -55,6 +55,11 @@ Home shows the selected controller, its gameplay and configuration states, and
 battery when available. Tap the battery indicator to refresh when available. An unavailable battery
 reading is not displayed as 0%.
 
+On phones, **Connect to app** appears before the controller artwork when the
+configuration channel is offline. **Why two connections?** explains the separate
+gameplay and configuration links; **Find configuration connection** opens the
+discovery flow. On wide two-pane layouts, connection actions stay in the side pane.
+
 <img src="images/dashboard.png" width="300" alt="Home with a saved EasySMX X10, front view of the controller and shortcuts to gameplay, QMacro and Profiles">
 
 *Home with a physical EasySMX X10 selected and no active configuration connection

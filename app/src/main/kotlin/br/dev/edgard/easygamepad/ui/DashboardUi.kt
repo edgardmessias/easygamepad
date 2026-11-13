@@ -120,6 +120,7 @@ data class DashboardActions(
     val layout = LocalWindowLayout.current
     val connectDisabledReason = AccessibilitySemantics.dashboardConnectDisabledReason(state.switching, status.connecting, portuguese)
     val isDemo = device?.let(DemoController::isDevice) == true
+    val connectPlacement = dashboardConnectPlacement(layout.twoPane, state.showConnectCard)
     if (device == null) {
         AdaptivePanes(secondary = {
             ActionCard(
@@ -161,41 +162,21 @@ data class DashboardActions(
             }
         }
         AnimatedVisibility(
-            state.showConnectCard,
+            connectPlacement == DashboardConnectPlacement.SECONDARY,
             enter = expandVertically() + fadeIn(),
             exit = shrinkVertically() + fadeOut(),
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                ScreenConnectCard(
-                    title = if (device.supportsKeyLinker) tr("Battery & settings", "Bateria e ajustes")
-                    else tr("Battery & customization", "Bateria e personalização"),
-                    description = when {
-                        device.supportsKeyLinker -> tr(
-                            "Connect to read battery, firmware and settings. Close the KeyLinker app on other phones first.",
-                            "Conecte para ler bateria, firmware e ajustes. Feche o app KeyLinker em outros celulares antes.",
-                        )
-                        status.gameplayConnected -> tr(
-                            "Your game is connected. Connect to QMacro for battery and settings. Disconnect it on other phones first.",
-                            "O jogo já está conectado. Conecte ao QMacro para consultar a carga e os ajustes. Desconecte de outros celulares antes.",
-                        )
-                        else -> tr("Turn on your controller in BT mode and keep it nearby.", "Ligue o controle no modo BT e mantenha por perto.")
-                    },
-                    connecting = status.connecting,
-                    connectEnabled = state.connectEnabled,
-                    connectLabel = if (isDemo) tr("Connect demo", "Conectar demo") else tr("Connect to app", "Conectar ao app"),
-                    connectingLabel = tr("Connecting…", "Conectando…"),
-                    onConnect = actions.onConnectSelected,
-                    connectDisabledReason = connectDisabledReason,
-                )
-                if (!isDemo) {
-                    TextButton(
-                        onClick = actions.onOpenConnectionSheet,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                    ) {
-                        Text(tr("Find configuration connection", "Buscar conexão do controle"))
-                    }
-                }
-            }
+            DashboardConfigurationConnectSection(
+                device = device,
+                status = status,
+                isDemo = isDemo,
+                connecting = status.connecting,
+                connectEnabled = state.connectEnabled,
+                connectDisabledReason = connectDisabledReason,
+                compact = false,
+                onConnect = actions.onConnectSelected,
+                onOpenConnectionSheet = actions.onOpenConnectionSheet,
+            )
         }
         SectionTitle(tr("Make it yours", "Do seu jeito"))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -322,6 +303,23 @@ data class DashboardActions(
                     )
                 }
             }
+        }
+        AnimatedVisibility(
+            connectPlacement == DashboardConnectPlacement.PRIMARY_COMPACT,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut(),
+        ) {
+            DashboardConfigurationConnectSection(
+                device = device,
+                status = status,
+                isDemo = isDemo,
+                connecting = status.connecting,
+                connectEnabled = state.connectEnabled,
+                connectDisabledReason = connectDisabledReason,
+                compact = true,
+                onConnect = actions.onConnectSelected,
+                onOpenConnectionSheet = actions.onOpenConnectionSheet,
+            )
         }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (device.artwork != null && !layout.twoPane) {
