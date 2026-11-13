@@ -42,6 +42,10 @@ fun ProfilesListScreen(
     showDraftRow: Boolean,
     canReadFromDevice: Boolean,
     readDisabledReason: String?,
+    configurationChannelStatus: String? = null,
+    configurationConnectEnabled: Boolean = false,
+    showConfigurationChannelRow: Boolean = false,
+    onConnectConfiguration: () -> Unit = {},
     onEditDraft: () -> Unit,
     onEditSaved: (SavedProfile) -> Unit,
     onLoad: (SavedProfile) -> Unit,
@@ -52,19 +56,25 @@ fun ProfilesListScreen(
     onImport: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
-        Column(Modifier.padding(horizontal = ScreenLayout.horizontalPadding, vertical = 12.dp)) {
+        Column(Modifier.padding(horizontal = ScreenLayout.horizontalPadding, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(tr("Saved profiles", "Perfis salvos"), style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
             Text(
                 tr("${profiles.size} of $MAX_SAVED_PROFILES saved", "${profiles.size} de $MAX_SAVED_PROFILES salvos"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(Modifier.height(4.dp))
             Text(
                 tr("Choose a profile to edit.", "Escolha um perfil para editar."),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (showConfigurationChannelRow && configurationChannelStatus != null) {
+                ProfilesListConfigurationChannelRow(
+                    status = configurationChannelStatus,
+                    connectEnabled = configurationConnectEnabled,
+                    onConnect = onConnectConfiguration,
+                )
+            }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         LazyColumn(

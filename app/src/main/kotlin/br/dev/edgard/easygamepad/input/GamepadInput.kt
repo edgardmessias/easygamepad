@@ -24,7 +24,13 @@ data class InputState(
     val events: Int = 0,
     val paddleBindings: Map<PadKey, Int> = emptyMap(), val learningPaddle: PadKey? = null,
     val rightSamples: List<Pair<Float, Float>> = emptyList(),
+    /** Per-key press counters preserve quick taps across conflated StateFlow/Compose updates. */
+    val pressCounts: Map<Int, Int> = emptyMap(),
 )
+
+internal fun InputState.pressCountsAfter(key: Int, down: Boolean): Map<Int, Int> =
+    if (down && key !in pressed) pressCounts + (key to ((pressCounts[key] ?: 0) + 1)) else pressCounts
+
 class GamepadInput(context: Context) : InputManager.InputDeviceListener {
   companion object {
         /** Synthetic Android input id for the demo overlay; not a real [InputDevice]. */
@@ -61,6 +67,7 @@ class GamepadInput(context: Context) : InputManager.InputDeviceListener {
                 pressed = if (down) old.pressed + keyCode else old.pressed - keyCode,
                 tested = old.tested + keyCode,
                 events = old.events + 1,
+                pressCounts = old.pressCountsAfter(keyCode, down),
             ),
         )
     }
@@ -132,6 +139,7 @@ class GamepadInput(context: Context) : InputManager.InputDeviceListener {
         sessions.update(event.deviceId, old.copy(
             pressed = if (event.action == KeyEvent.ACTION_DOWN) old.pressed + event.keyCode else old.pressed - event.keyCode,
             tested = old.tested + event.keyCode, events = old.events + 1,
+            pressCounts = old.pressCountsAfter(event.keyCode, event.action == KeyEvent.ACTION_DOWN),
             paddleBindings = if (learning != null) old.paddleBindings + (learning to event.keyCode) else old.paddleBindings,
             learningPaddle = if (learning != null) null else old.learningPaddle,
         ))

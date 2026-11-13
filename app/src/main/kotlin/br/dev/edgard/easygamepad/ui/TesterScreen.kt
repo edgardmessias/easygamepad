@@ -2,6 +2,8 @@
 // Copyright (C) 2026 Edgard
 package br.dev.edgard.easygamepad.ui
 
+import android.content.Intent
+import android.os.Build
 import android.view.KeyEvent
 import android.view.MotionEvent
 import androidx.compose.foundation.Canvas
@@ -13,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -21,14 +24,22 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import br.dev.edgard.easygamepad.BuildConfig
 import br.dev.edgard.easygamepad.HubViewModel
+import br.dev.edgard.easygamepad.ble.LinkPhase
 import br.dev.edgard.easygamepad.data.ConsumerCopy
 import br.dev.edgard.easygamepad.demo.DemoController
+import br.dev.edgard.easygamepad.input.GuidedApplyStatus
+import br.dev.edgard.easygamepad.input.GuidedReport
+import br.dev.edgard.easygamepad.input.GuidedReportHeader
+import br.dev.edgard.easygamepad.input.GuidedTest
 import br.dev.edgard.easygamepad.input.InputChipState
 import br.dev.edgard.easygamepad.input.InputState
 import br.dev.edgard.easygamepad.input.inputChipState
 import br.dev.edgard.easygamepad.input.selectedPadLabel
+import br.dev.edgard.easygamepad.protocol.ConfigurationProtocol
 import br.dev.edgard.easygamepad.protocol.PadKey
+import br.dev.edgard.easygamepad.protocol.X10ApplyResult
 import kotlin.math.abs
 import kotlin.math.sqrt
 import java.util.Locale
@@ -40,6 +51,71 @@ import java.util.Locale
     val devices by model.devices.collectAsStateWithLifecycle()
     var rear by rememberSaveable { mutableStateOf(false) }
     var details by rememberSaveable { mutableStateOf(false) }
+    val link by model.link.collectAsStateWithLifecycle()
+    val hardware by model.hardware.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val portuguese = LocalPortuguese.current
+    var guided by remember { mutableStateOf(GuidedTest.disabled()) }
+    var restRejected by remember { mutableStateOf(false) }
+    val modelLabel = controller?.let { device ->
+        val name = device.displayName()
+        val product = device.productName
+        if (product != null && product != name) "$name · $product" else name
+    }.orEmpty()
+    val binding = guidedBindingFor(controller, state, modelLabel, DemoController.isDevice(controller))
+    val plan = guidedPlanFor(controller)
+    // Same event id is ignored by the session, so this recomposition cannot stack duplicate samples.
+    val sample = remember(controller?.id, state.selectedId, state.events, state.pressed, state.axes, state.pressCounts) {
+        guidedSampleFor(controller?.id, state)
+    }
+    val shown = GuidedTest.ingest(GuidedTest.align(guided, binding, plan), sample)
+    val bindingKey = binding?.controllerId to binding?.inputId
+    var seenBinding by remember { mutableStateOf(bindingKey) }
+    SideEffect {
+        if (seenBinding != bindingKey) {
+            seenBinding = bindingKey
+            restRejected = false
+        }
+        if (shown != guided) guided = shown
+    }
+    val applyResult = hardware.applyResult
+    val applyNote = GuidedTest.applyNote(
+        synthetic = DemoController.isDevice(controller),
+        deviceAddress = controller?.address,
+        linkReady = link.phase == LinkPhase.READY && link.protocol == ConfigurationProtocol.KRLY,
+        linkAddress = link.address,
+        status = when (applyResult) {
+            is X10ApplyResult.Matched -> GuidedApplyStatus.MATCHED
+            is X10ApplyResult.Mismatch -> GuidedApplyStatus.MISMATCH
+            is X10ApplyResult.Unconfirmed -> GuidedApplyStatus.UNCONFIRMED
+            null -> null
+        },
+        fields = (applyResult as? X10ApplyResult.Mismatch)?.fields?.map { it.name.lowercase() }.orEmpty(),
+    )
+    fun resetLive() {
+        model.app.input.reset()
+        restRejected = false
+        guided = GuidedTest.reset(shown)
+    }
+    fun shareGuided() {
+        val text = GuidedReport.render(
+            shown,
+            GuidedReportHeader(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE.toString(), Build.VERSION.RELEASE, Build.VERSION.SDK_INT.toString()),
+            portuguese,
+            applyNote,
+        )
+        val subject = if (portuguese) "Teste guiado do EasyGamepad" else "EasyGamepad guided test"
+        runCatching {
+            context.startActivity(
+                Intent.createChooser(
+                    Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text).putExtra(Intent.EXTRA_SUBJECT, subject),
+                    subject,
+                ),
+            )
+        }.onFailure {
+            model.repository.notice("Could not open sharing. Try again.", "Não foi possível abrir o compartilhamento. Tente novamente.", true)
+        }
+    }
     val keys = listOf(KeyEvent.KEYCODE_BUTTON_A to "A", KeyEvent.KEYCODE_BUTTON_B to "B", KeyEvent.KEYCODE_BUTTON_X to "X", KeyEvent.KEYCODE_BUTTON_Y to "Y",
         KeyEvent.KEYCODE_BUTTON_L1 to "LB", KeyEvent.KEYCODE_BUTTON_R1 to "RB", KeyEvent.KEYCODE_BUTTON_L2 to "LT", KeyEvent.KEYCODE_BUTTON_R2 to "RT",
         KeyEvent.KEYCODE_BUTTON_THUMBL to "L3", KeyEvent.KEYCODE_BUTTON_THUMBR to "R3", KeyEvent.KEYCODE_BUTTON_SELECT to "View", KeyEvent.KEYCODE_BUTTON_START to "Menu",
@@ -86,7 +162,7 @@ import java.util.Locale
                 "Filled chips show a live press. Primary outlines mean you already tested that control. This mirrors Android input codes, not a remapped M1 label.",
                 "Chips preenchidos mostram um pressionamento ao vivo. Contorno primário indica que você já testou aquele controle. Isto espelha os códigos de entrada do Android, não um rótulo remapeado do M1.",
             ))
-            OutlinedButton(onClick = { model.app.input.reset() }) { Text(tr("Reset tester", "Reiniciar teste")) }
+            OutlinedButton(onClick = { resetLive() }) { Text(tr("Reset tester", "Reiniciar teste")) }
         }
         if (state.axes.isNotEmpty()) TextButton(onClick = { details = !details }) {
             Text(if (details) tr("Hide technical details", "Ocultar detalhes técnicos") else tr("Technical details", "Detalhes técnicos"))
@@ -125,10 +201,45 @@ import java.util.Locale
                 }
             }
         }
+        TesterGuidedCard(
+            session = shown,
+            applyNote = applyNote,
+            restRejected = restRejected,
+            onBegin = {
+                val current = sample
+                if (current != null) {
+                    restRejected = false
+                    guided = GuidedTest.begin(shown, current)
+                }
+            },
+            onPause = { guided = GuidedTest.pause(shown) },
+            onResume = {
+                val current = sample
+                if (current != null) guided = GuidedTest.resume(shown, current)
+            },
+            onStartOver = {
+                val current = sample
+                if (current != null) {
+                    restRejected = false
+                    guided = GuidedTest.begin(shown, current)
+                }
+            },
+            onFinish = { guided = GuidedTest.finish(shown) },
+            onRest = {
+                val current = sample
+                if (current != null) {
+                    val result = GuidedTest.captureRest(shown, current)
+                    restRejected = !result.captured
+                    guided = result.session
+                }
+            },
+            onConfirmRear = { id -> guided = GuidedTest.confirmRear(shown, id) },
+            onShare = { shareGuided() },
+        )
         HubCard(Modifier.fillMaxWidth()) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(controller?.displayName() ?: tr("Controller preview", "Visual do controle"), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                TextButton(onClick = { model.app.input.reset() }, enabled = hasInput) { Text(tr("Reset", "Reiniciar")) }
+                TextButton(onClick = { resetLive() }, enabled = hasInput) { Text(tr("Reset", "Reiniciar")) }
             }
             if (controller?.artwork != null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected = !rear, onClick = { rear = false }, label = { Text(tr("Front", "Frente")) })
@@ -155,8 +266,10 @@ import java.util.Locale
                 Text(tr("Press ", "Pressione ") + paddle.label + tr(" now…", " agora…"), color = MaterialTheme.colorScheme.primary)
                 TextButton(onClick = { model.app.input.identifyPaddle(null) }) { Text(tr("Cancel identification", "Cancelar identificação")) }
             }
-            Description(tr("If M1 repeats A, both light up together. This identifies the button for testing and keeps its current function.",
-                "Se M1 repete A, os dois acendem juntos. A identificação serve para o teste e mantém a função atual do botão."))
+            Description(tr(
+                "If M1 repeats A, both light up together. This identifies the button for the live view and keeps its current function. It does not mark the paddle on the guided checklist.",
+                "Se M1 repete A, os dois acendem juntos. A identificação serve para a vista ao vivo e mantém a função atual do botão. Ela não marca o paddle na lista guiada.",
+            ))
         }
     }
 }

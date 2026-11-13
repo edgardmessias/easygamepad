@@ -55,6 +55,11 @@ Home shows the selected controller, its gameplay and configuration states, and
 battery when available. Tap the battery indicator to refresh when available. An unavailable battery
 reading is not displayed as 0%.
 
+On phones, **Connect to app** appears before the controller artwork when the
+configuration channel is offline. **Why two connections?** explains the separate
+gameplay and configuration links; **Find configuration connection** opens the
+discovery flow. On wide two-pane layouts, connection actions stay in the side pane.
+
 <img src="images/dashboard.png" width="300" alt="Home with a saved EasySMX X10, front view of the controller and shortcuts to gameplay, QMacro and Profiles">
 
 *Home with a physical EasySMX X10 selected and no active configuration connection
@@ -113,12 +118,44 @@ This is a temporary testing aid; it does not reprogram the paddle or distinguish
 two physical buttons that send the same event. The tester does not inject input
 or remap controls in other apps.
 
+### Guided test and report
+
+Choose an Android gameplay input, then tap **Start** in **Guided test**. Only
+observations after starting count. Press each button, move both sticks in all
+directions, and squeeze the triggers slowly. Trigger travel requires an observed
+intermediate value and a peak of at least 95%; a key press or an endpoint jump
+alone is listed separately. These thresholds describe observed movement, not
+controller health.
+
+**View checklist** shows observed and missing controls. Generic gamepads use an
+optional checklist because their available controls vary. Rear-paddle checks are
+manual: confirm each only after pressing that physical paddle. An Android event
+matching a face button does not identify a physical paddle.
+
+Release sticks and triggers before **Record rest**. This stores the current
+available axis values you confirm, not an averaged drift measurement. **Pause**
+stops collection; **Finish** keeps a partial result when observations are missing.
+**Share report** opens Android's sharing chooser with a text snapshot containing
+app/Android versions, model, input name, observations and any captured rest values.
+Demo sessions are explicitly marked synthetic. MAC addresses are omitted.
+
+The checklist is temporary: leaving Test, recreating the screen, changing inputs,
+disconnecting gameplay input, or resetting the live tester clears it. Share the
+report before leaving. A matching X10 configuration read-back, when available,
+is reported separately and does not verify physical behavior or retention after
+turning the controller off.
+
 ## Work with profiles
 
 Open **Profiles** with an X10 selected. The **Saved profiles** list is the
 landing screen: saved phone copies, the current draft when it is not linked to a
 saved copy, and **Read from X10** / **Import profile from a file** at the bottom.
 The copy currently being edited is highlighted.
+
+If the configuration channel is unavailable, the list shows its status and a
+**Connect** action when reconnecting is allowed. During an operation or calibration,
+it explains why **Read from X10** is unavailable instead of describing the link as
+offline.
 
 Tap a row to open the editor — the draft row always edits; a saved copy opens for
 editing when it is already loaded, otherwise it loads into the editor after
