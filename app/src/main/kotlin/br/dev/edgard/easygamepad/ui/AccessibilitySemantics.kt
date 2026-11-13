@@ -17,6 +17,21 @@ object AccessibilitySemantics {
         else -> "Inactive"
     }
 
+    enum class StickReverseAxis { LeftRight, UpDown }
+
+    fun stickReverseToggleLabel(stickTitle: String, axis: StickReverseAxis, portuguese: Boolean): String = when (axis) {
+        StickReverseAxis.LeftRight -> if (portuguese) {
+            "$stickTitle, inverter esquerda e direita"
+        } else {
+            "$stickTitle, reverse left and right"
+        }
+        StickReverseAxis.UpDown -> if (portuguese) {
+            "$stickTitle, inverter cima e baixo"
+        } else {
+            "$stickTitle, reverse up and down"
+        }
+    }
+
     fun vibrationSliderLabel(label: String, value: Int, suffix: String, previewing: Boolean, portuguese: Boolean): String {
         val base = "$label, $value$suffix"
         if (!previewing) return base
@@ -28,6 +43,11 @@ object AccessibilitySemantics {
         state.calibration.stopRequired -> if (portuguese) "Finalize a calibração antes de ler." else "Finish calibration before reading."
         state.busy -> if (portuguese) "Aguarde a operação atual do controle." else "Wait for the current controller operation."
         state.linkPhase != LinkPhase.READY -> if (portuguese) "Conecte o app ao controle primeiro." else "Connect the app to the controller first."
+        !state.configurationLinkSelected -> if (portuguese) {
+            "Conecte o controle selecionado no app antes de ler."
+        } else {
+            "Connect the selected controller in the app before reading."
+        }
         else -> if (portuguese) "Leitura indisponível." else "Reading unavailable."
     }
 
@@ -37,6 +57,11 @@ object AccessibilitySemantics {
         state.calibration.stopRequired -> if (portuguese) "Finalize a calibração antes de aplicar." else "Finish calibration before applying."
         state.busy -> if (portuguese) "Aguarde a operação atual do controle." else "Wait for the current controller operation."
         state.linkPhase != LinkPhase.READY -> if (portuguese) "Conecte o app ao controle primeiro." else "Connect the app to the controller first."
+        !state.configurationLinkSelected -> if (portuguese) {
+            "Conecte o controle selecionado no app antes de aplicar."
+        } else {
+            "Connect the selected controller in the app before applying."
+        }
         else -> if (portuguese) "Ação indisponível." else "Action unavailable."
     }
 

@@ -16,8 +16,15 @@ class ProfilesEditorUiStateTest {
 
     @Test fun busyBlocksApplyEvenWhenLinkReady() {
         val state = ScreenUiFixtures.profilesBusyOnReady()
-        assertTrue(state.configurationReady.not())
+        assertFalse(state.configurationReady)
         assertFalse(state.canApplyOrReadFromDevice)
+    }
+
+    @Test fun staleReadyLinkWithoutSelectedMatchBlocksHardwareActions() {
+        val mismatched = ScreenUiFixtures.profilesReadyToApply().copy(configurationLinkSelected = false)
+        assertFalse(mismatched.configurationReady)
+        assertFalse(mismatched.canApplyToDevice)
+        assertFalse(mismatched.canReadFromDevice)
     }
 
     @Test fun calibrationStopBlocksHardwareActions() {

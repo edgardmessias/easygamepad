@@ -12,7 +12,13 @@ import androidx.compose.ui.unit.dp
 import br.dev.edgard.easygamepad.protocol.*
 
 @Composable
-fun X10ApplyDialog(config: ControllerConfig, ready: Boolean, dismiss: () -> Unit, apply: () -> Unit) {
+fun X10ApplyDialog(
+    config: ControllerConfig,
+    ready: Boolean,
+    simulated: Boolean = false,
+    dismiss: () -> Unit,
+    apply: () -> Unit,
+) {
     val valid = remember(config) { config.profileIsValid() }
     val plan = remember(config, valid) { if (valid) config.x10UploadPlan() else null }
     val issues = remember(config) { config.profileValidationIssues() }
@@ -32,18 +38,32 @@ fun X10ApplyDialog(config: ControllerConfig, ready: Boolean, dismiss: () -> Unit
                     )
                 } else if (plan != null) {
                     Text(
-                        tr(
-                            "Your configured settings in this profile will be sent to the X10.",
-                            "Os ajustes que você configurou neste perfil serão enviados ao X10.",
-                        ),
+                        if (simulated) {
+                            tr(
+                                "Your configured settings will be sent to the Demo X10 simulator, not to physical hardware.",
+                                "Os ajustes configurados serão enviados ao simulador Demo X10, não a hardware físico.",
+                            )
+                        } else {
+                            tr(
+                                "Your configured settings in this profile will be sent to the X10.",
+                                "Os ajustes que você configurou neste perfil serão enviados ao X10.",
+                            )
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     if (!ready) {
                         Text(
-                            tr(
-                                "Connect your X10 in configuration mode to apply.",
-                                "Conecte seu X10 no modo de configuração para aplicar.",
-                            ),
+                            if (simulated) {
+                                tr(
+                                    "Connect the Demo X10 simulator in configuration mode to apply.",
+                                    "Conecte o simulador Demo X10 no modo de configuração para aplicar.",
+                                )
+                            } else {
+                                tr(
+                                    "Connect your X10 in configuration mode to apply.",
+                                    "Conecte seu X10 no modo de configuração para aplicar.",
+                                )
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                         )

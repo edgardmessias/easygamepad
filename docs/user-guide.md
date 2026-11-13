@@ -2,8 +2,12 @@
 
 EasyGamepad tests gamepads through Android and provides advanced configuration
 for the EasySMX X10. The screenshots below show the Android app in English with
-the dark theme. Battery readings and connection states are real observations;
-editor values are local drafts, not proof that those settings were applied.
+the dark theme. Hardware status in physical-controller captures reflects the
+observed connection; Demo X10 frames use the simulator. Editor values are local
+drafts, not proof that those settings were applied to hardware.
+The **profiles list** image reflects the current app on device (version code 8).
+Editor section images use a **local demo X10 draft** prepared for documentation
+without applying settings to hardware.
 
 Jump to [setup](#install-and-connect), [input testing](#test-a-gamepad),
 [profiles and customization](#work-with-profiles), [controller tools](#controller-tools),
@@ -48,12 +52,13 @@ marked **Saved · waiting for a signal** is not evidence that the device is near
 ### Home and controller selection
 
 Home shows the selected controller, its gameplay and configuration states, and
-battery when available. Tap the battery card to refresh. An unavailable battery
+battery when available. Tap the battery indicator to refresh when available. An unavailable battery
 reading is not displayed as 0%.
 
-<img src="images/dashboard.png" width="300" alt="Home showing an EasySMX X10 with both connections active and an 85 percent battery reading">
+<img src="images/dashboard.png" width="300" alt="Home with a saved EasySMX X10, front view of the controller and shortcuts to gameplay, QMacro and Profiles">
 
-*Home with the X10 connected for gameplay and configuration.*
+*Home with a physical EasySMX X10 selected and no active configuration connection
+when this frame was captured.*
 
 Use **Manage** or the top controller picker to switch devices or **Rename** one.
 The name changes only in EasyGamepad. Switching the selected controller closes
@@ -110,20 +115,39 @@ or remap controls in other apps.
 
 ## Work with profiles
 
-Open **Profiles** with an X10 selected. Changes begin as a local draft.
-Swipe the section tabs horizontally to reach **Turbo** and **Vibration** on a
-narrow screen. Scroll vertically to see both sticks or triggers and file actions;
-**Save profile** and **Apply to X10** stay in the bottom action bar.
+Open **Profiles** with an X10 selected. The **Saved profiles** list is the
+landing screen: saved phone copies, the current draft when it is not linked to a
+saved copy, and **Read from X10** / **Import profile from a file** at the bottom.
+The copy currently being edited is highlighted.
 
-| Action | Result |
-| --- | --- |
-| Edit controls | Changes the current draft |
-| Save profile | Adds a saved copy on this phone, up to 30 profiles |
-| Update saved | Overwrites the saved copy you loaded, after confirmation |
-| Load a saved profile | Replaces the draft after confirmation |
-| Apply to X10 | Sends the draft to the connected X10 after confirmation |
-| Export profile | Writes the draft to a JSON file you choose |
-| Import profile from a file | Loads a compatible JSON file into the draft |
+Tap a row to open the editor — the draft row always edits; a saved copy opens for
+editing when it is already loaded, otherwise it loads into the editor after
+confirmation when you have unsaved edits. **Apply** on a saved row sends that
+saved snapshot to the connected X10 after confirmation (it does not use unsaved
+editor changes). **Delete** or a long press on a row asks you to confirm the
+profile name. The **⋮** menu on each saved row offers **Export profile** only.
+
+In the editor, changes begin as a local draft. Use the section arrows or tap the
+section name to choose among the six sections. Scroll vertically for additional
+controls; **Save profile** or **Update saved**, alongside **Apply to X10**, are in
+the bottom action bar. Scroll upward to reveal the bar if it has collapsed.
+
+<img src="images/profiles.png" width="300" alt="Profiles landing list with the current draft row, Read from X10 and Import profile from a file">
+
+*Profiles landing with a physical X10 selected, no active configuration connection
+and no saved copies on the phone. Only the local draft row is shown;
+Apply and Delete appear on saved rows.*
+
+| Action | Where | Result |
+| --- | --- | --- |
+| Tap a profile | List row or draft row | Opens the profile editor |
+| Save profile | Editor bottom bar | Adds a saved copy on this phone, up to 30 profiles |
+| Update saved | Editor bottom bar | Updates the saved copy linked to the draft |
+| Choose a different saved copy | Saved row | Opens that copy in the editor; asks before replacing unsaved changes |
+| Apply | List row or editor | Sends that profile snapshot to the connected X10 after confirmation |
+| Export profile | List **⋮** menu or editor | Writes the profile to a JSON file you choose |
+| Import profile from a file | List footer | Loads a compatible JSON file into the draft |
+| Read from X10 | List footer | Replaces mapping and tuning fields from the X10 after confirmation |
 
 Saving, loading and importing do not apply settings to the controller. Exporting
 does not add a saved phone profile. Drafts are separate for each selected
@@ -131,7 +155,8 @@ controller during the app session; save or export work you want to keep.
 
 ### Read the current X10 settings
 
-Tap **Read from X10**, beside the draft name, and confirm **Read from X10**.
+Tap **Read from X10** in the profiles list or the editor's **⋮** menu, and confirm
+**Read from X10**.
 Save your draft first if you want to keep its existing values.
 
 The read replaces **face mappings, M1/M2 rear remaps, rear-paddle macros,
@@ -144,7 +169,7 @@ does not prove persistence after power-off.
 ### Buttons
 
 Tap a button in the illustration to choose its output. Switch to **Back** for M1
-and M2, or scroll to **Show button list** for a list editor. **Restore standard
+and M2, or scroll through the button mapping list. **Restore standard
 output** restores a regular button in the draft. M1/M2 without a mapping, macro
 or disabled state are omitted on apply, leaving the controller's current slot
 untouched. **Disable paddle** marks M1 or M2
@@ -180,7 +205,7 @@ in **Test** to understand your controller's current trigger mode.
 
 Choose **+ M1** or **+ M2** to add a rear-paddle sequence. Each step has one button,
 a **Hold (ms)** duration and a **Wait (ms)** duration. Add up to 32 steps per paddle;
-use the step's button picker, move-up action or remove action to edit it.
+use the step's button picker and **⋮** menu to move, duplicate or remove steps.
 **Repeat sequence** changes the repeat setting in the draft. **Remove macro**
 marks that paddle **disabled** in the draft, but you can
 assign a new remap or macro afterward without leaving the editor.
@@ -188,18 +213,18 @@ assign a new remap or macro afterward without leaving the editor.
 Hold duration must be 1–65,535 ms; wait duration can be 0–65,535 ms. A sequence
 needs at least one valid step before the profile can be saved or applied.
 
-<img src="images/macros.png" width="300" alt="Local M1 macro draft containing an A button step with hold and wait durations of 100 milliseconds">
+<img src="images/macros.png" width="300" alt="Empty macro editor in Demo X10 with actions to add a sequence for M1 or M2">
 
-*A local example, prepared for this screenshot without applying it to the X10.*
+*The demo draft has no macro sequences yet.*
 
 ### Turbo
 
 Choose **Add turbo button**, select a button, set the rate from 1 to 20 and choose
-whether to enable **Automatic turbo**. Use **Remove** to delete an entry from the
+whether to enable **Automatic turbo**. Use **Remove from profile** to delete an entry from the
 draft. The rate is the controller's protocol value; the app does not verify a
 precise presses-per-second measurement.
 
-<img src="images/turbo.png" width="300" alt="Turbo editor with a local A button entry, an automatic turbo switch and a rate control">
+<img src="images/turbo.png" width="300" alt="Empty Demo X10 turbo editor with the Add turbo button action">
 
 ### Vibration
 

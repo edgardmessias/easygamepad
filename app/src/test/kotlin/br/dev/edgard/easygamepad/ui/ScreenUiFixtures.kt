@@ -26,11 +26,11 @@ object ScreenUiFixtures {
     fun configurationGenericSelected() = ConfigurationUnavailableUiState("Xbox pad", gameplayLinked = true, hasBleAddress = false)
 
     fun profilesDisconnectedValid() = ProfilesEditorUiState(LinkPhase.DISCONNECTED, busy = false, draftValid = true)
-    fun profilesBusyOnReady() = ProfilesEditorUiState(LinkPhase.READY, busy = true, draftValid = true)
+    fun profilesBusyOnReady() = ProfilesEditorUiState(LinkPhase.READY, configurationLinkSelected = true, busy = true, draftValid = true)
     fun profilesCalibrationStop() = ProfilesEditorUiState(
-        LinkPhase.READY, busy = false,
+        LinkPhase.READY, configurationLinkSelected = true, busy = false,
         calibration = CalibrationState(CalibrationKind.STICKS, CalibrationPhase.ACTIVE, stopRequired = true),
         draftValid = true,
     )
-    fun profilesReadyToApply() = ProfilesEditorUiState(LinkPhase.READY, busy = false, draftValid = true)
+    fun profilesReadyToApply() = ProfilesEditorUiState(LinkPhase.READY, configurationLinkSelected = true, busy = false, draftValid = true)
 }

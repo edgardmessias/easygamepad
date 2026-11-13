@@ -73,6 +73,7 @@ import java.util.Locale
     }
     HubTheme(prefs.theme, prefs.language) {
         val tab by model.tab.collectAsStateWithLifecycle()
+        val profilesEditorOpen by model.profileEditorOpen.collectAsStateWithLifecycle()
         val link by model.link.collectAsStateWithLifecycle()
         val hardware by model.hardware.collectAsStateWithLifecycle()
         val sheet by model.connectionSheet.collectAsStateWithLifecycle()
@@ -124,7 +125,11 @@ import java.util.Locale
                 else -> model.scan()
             }
         }
-        BackHandler(enabled = tab != 0 && !sheet) { model.tab.value = 0 }
+        LaunchedEffect(tab) { if (tab != 1) model.closeProfilesEditor() }
+        val configurationProfilesEditor = controller?.supportsConfiguration == true
+        BackHandler(enabled = hubProfilesTabBackToHomeEnabled(tab, sheet, profilesEditorOpen, configurationProfilesEditor)) {
+            model.tab.value = 0
+        }
         ProvideWindowLayout {
         val layout = LocalWindowLayout.current
         val tabs = buildList {

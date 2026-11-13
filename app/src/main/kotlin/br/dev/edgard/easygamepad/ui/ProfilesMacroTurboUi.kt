@@ -3,20 +3,20 @@
 package br.dev.edgard.easygamepad.ui
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import br.dev.edgard.easygamepad.protocol.*
 
 @Composable
 fun MacroEditor(macros: List<Macro>, change: (List<Macro>) -> Unit) {
     var picker by remember { mutableStateOf<Pair<Int, Int>?>(null) }
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (macros.isEmpty()) {
             InfoBanner(tr("Start with a simple sequence, like A → B, assigned to M1.", "Comece com uma sequência simples, como A → B, atribuída ao M1."))
         }
@@ -37,20 +37,31 @@ fun MacroEditor(macros: List<Macro>, change: (List<Macro>) -> Unit) {
                         "Sequência vazia — adicione uma etapa ou remova este botão do perfil antes de aplicar."))
                 }
                 ToggleRow(tr("Repeat sequence", "Repetir sequência"), macro.repeat) { update(macro.copy(repeat = it)) }
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.heightIn(max = 420.dp)) {
-                    itemsIndexed(macro.steps, key = { stepIndex, _ -> "$index-$stepIndex" }) { stepIndex, step ->
-                        MacroStepCard(
-                            stepIndex = stepIndex,
-                            step = step,
-                            stepCount = macro.steps.size,
-                            onPickKey = { picker = index to stepIndex },
-                            onMoveUp = { update(macro.moveStep(stepIndex, -1)) },
-                            onMoveDown = { update(macro.moveStep(stepIndex, 1)) },
-                            onDuplicate = { runCatching { update(macro.duplicateStepAt(stepIndex)) } },
-                            onRemove = { update(macro.removeStepAt(stepIndex)) },
-                            onHoldChange = { value -> update(macro.copy(steps = macro.steps.toMutableList().also { it[stepIndex] = step.copy(holdMs = value) })) },
-                            onWaitChange = { value -> update(macro.copy(steps = macro.steps.toMutableList().also { it[stepIndex] = step.copy(delayMs = value) })) },
-                        )
+                Description(tr("${macro.steps.size} of $MACRO_STEP_LIMIT steps", "${macro.steps.size} de $MACRO_STEP_LIMIT etapas"))
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    macro.steps.forEachIndexed { stepIndex, step ->
+                        key("$index-$stepIndex") {
+                            MacroStepCard(
+                                stepIndex = stepIndex,
+                                step = step,
+                                stepCount = macro.steps.size,
+                                onPickKey = { picker = index to stepIndex },
+                                onMoveUp = { update(macro.moveStep(stepIndex, -1)) },
+                                onMoveDown = { update(macro.moveStep(stepIndex, 1)) },
+                                onDuplicate = { runCatching { update(macro.duplicateStepAt(stepIndex)) } },
+                                onRemove = { update(macro.removeStepAt(stepIndex)) },
+                                onHoldChange = { value ->
+                                    update(macro.copy(steps = macro.steps.toMutableList().also {
+                                        it[stepIndex] = step.copy(holdMs = value)
+                                    }))
+                                },
+                                onWaitChange = { value ->
+                                    update(macro.copy(steps = macro.steps.toMutableList().also {
+                                        it[stepIndex] = step.copy(delayMs = value)
+                                    }))
+                                },
+                            )
+                        }
                     }
                 }
                 OutlinedButton(
@@ -114,20 +125,29 @@ private fun MacroStepCard(
     onHoldChange: (Int) -> Unit,
     onWaitChange: (Int) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    var stepMenu by remember { mutableStateOf(false) }
+    val stepActionsLabel = tr("Step actions", "Ações da etapa")
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (stepIndex > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Mono("%02d".format(stepIndex + 1))
-            OutlinedButton(onClick = onPickKey) { Text(step.key.label) }
+            OutlinedButton(onClick = onPickKey, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) {
+                Text(step.key.label)
+            }
             Spacer(Modifier.weight(1f))
-        }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            TextButton(onClick = onMoveUp, enabled = stepIndex > 0) { Text(tr("Move up", "Subir")) }
-            TextButton(onClick = onMoveDown, enabled = stepIndex < stepCount - 1) { Text(tr("Move down", "Descer")) }
-            TextButton(onClick = onDuplicate, enabled = stepCount < MACRO_STEP_LIMIT) { Text(tr("Duplicate", "Duplicar")) }
-            val removeLabel = tr("Remove step", "Remover etapa")
-            TextButton(onClick = onRemove) {
-                Text(removeLabel, color = MaterialTheme.colorScheme.error)
+            Box {
+                IconButton(onClick = { stepMenu = true }, modifier = Modifier.semantics { contentDescription = stepActionsLabel }) {
+                    Text("⋮", style = MaterialTheme.typography.titleMedium)
+                }
+                DropdownMenu(expanded = stepMenu, onDismissRequest = { stepMenu = false }) {
+                    DropdownMenuItem(text = { Text(tr("Move up", "Subir")) }, enabled = stepIndex > 0, onClick = { stepMenu = false; onMoveUp() })
+                    DropdownMenuItem(text = { Text(tr("Move down", "Descer")) }, enabled = stepIndex < stepCount - 1, onClick = { stepMenu = false; onMoveDown() })
+                    DropdownMenuItem(text = { Text(tr("Duplicate", "Duplicar")) }, enabled = stepCount < MACRO_STEP_LIMIT, onClick = { stepMenu = false; onDuplicate() })
+                    DropdownMenuItem(
+                        text = { Text(tr("Remove step", "Remover etapa"), color = MaterialTheme.colorScheme.error) },
+                        onClick = { stepMenu = false; onRemove() },
+                    )
+                }
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -165,7 +185,7 @@ private fun MacroNumberField(label: String, value: Int, range: IntRange, modifie
 @Composable
 fun TurboEditor(turbos: List<Turbo>, change: (List<Turbo>) -> Unit) {
     var picker by remember { mutableStateOf(false) }
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         turbos.forEachIndexed { index, turbo ->
             fun update(value: Turbo) = change(turbos.toMutableList().also { it[index] = value })
             HubCard(Modifier.fillMaxWidth()) {
@@ -181,7 +201,7 @@ fun TurboEditor(turbos: List<Turbo>, change: (List<Turbo>) -> Unit) {
                     1..20,
                     exactInput = true,
                 ) { update(turbo.copy(rate = it)) }
-                Description(tr("Higher values send a larger rate byte to the controller firmware.", "Valores maiores enviam um byte de taxa maior ao firmware do controle."))
+                Description(tr("Controller setting from 1 to 20 (same value sent in configuration).", "Ajuste do controle de 1 a 20 (mesmo valor enviado na configuração)."))
                 ToggleRow(tr("Automatic turbo", "Turbo automático"), turbo.automatic) { update(turbo.copy(automatic = it)) }
             }
         }

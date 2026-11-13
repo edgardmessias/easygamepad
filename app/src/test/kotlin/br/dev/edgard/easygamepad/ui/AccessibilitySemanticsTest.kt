@@ -15,6 +15,22 @@ class AccessibilitySemanticsTest {
     }
 
     @Test
+    fun stickReverseToggleUsesFullPhrases() {
+        val lr = AccessibilitySemantics.stickReverseToggleLabel(
+            "Left stick",
+            AccessibilitySemantics.StickReverseAxis.LeftRight,
+            portuguese = false,
+        )
+        assertEquals("Left stick, reverse left and right", lr)
+        val udPt = AccessibilitySemantics.stickReverseToggleLabel(
+            "Analógico direito",
+            AccessibilitySemantics.StickReverseAxis.UpDown,
+            portuguese = true,
+        )
+        assertEquals("Analógico direito, inverter cima e baixo", udPt)
+    }
+
+    @Test
     fun vibrationSliderAnnouncesPreviewWithoutStartingHardware() {
         val label = AccessibilitySemantics.vibrationSliderLabel("Left motor", 40, "%", previewing = true, portuguese = false)
         assertTrue(label.contains("Left motor"))
@@ -29,6 +45,8 @@ class AccessibilitySemanticsTest {
         assertTrue(AccessibilitySemantics.profilesApplyDisabledReason(cal, false)!!.contains("calibration"))
         val ready = ScreenUiFixtures.profilesReadyToApply()
         assertNull(AccessibilitySemantics.profilesApplyDisabledReason(ready, false))
+        val wrongDevice = ScreenUiFixtures.profilesReadyToApply().copy(configurationLinkSelected = false)
+        assertTrue(AccessibilitySemantics.profilesApplyDisabledReason(wrongDevice, false)!!.contains("selected controller"))
     }
 
     @Test

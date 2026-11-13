@@ -268,10 +268,19 @@ controller verified from a battery read or a screenshot.
 ## Documentation screenshots
 
 Capture the installed app using ADB, with **Settings → Language → English** and
-**Appearance → Dark**. Use a real X10 connection for connected states. The current
-images were captured on an M2007J20CG at native 1080 × 2400 resolution, using app
-version 1.0.0 (code 7). These identify the capture session, not a version pin for
-future documentation.
+**Appearance → Dark**. Use a real X10 connection for connected states when the
+screen should show hardware status. The current README and user-guide images were
+captured on an M2007J20CG at native 1080 × 2400 resolution. Metadata in capture
+sessions may cite different app `versionCode` values (for example code **8** for
+the profiles landing and demo-editor PNGs, older code **7** frames elsewhere).
+These identify the capture batch, not a version pin for future documentation.
+
+**Do not** run `connectedAndroidTest` or other Gradle instrumented targets on a
+physical phone you rely on for screenshots: the test runner may uninstall the app
+and wipe local profiles. Use an isolated emulator for instrumentation. For device
+captures, prefer `adb install -r` on an already installed debug build **without**
+`pm clear` or uninstall, then navigate with `adb shell input` and safe PNG pulls
+only.
 
 Navigate to the desired screen and wait for transient messages to disappear.
 Keep system font/display settings consistent. For editors, label draft examples
@@ -300,7 +309,7 @@ status or repaint controls. Use English alt text and captions when embedding ima
 The artwork shown in screenshots retains the attribution in [THIRD_PARTY.md](../THIRD_PARTY.md).
 
 The README uses `dashboard.png`, `buttons.png` and `tester.png` at a compact
-display width. The user guide also includes `tester-input.png`, `sticks.png`,
-`triggers.png`, `macros.png`, `turbo.png`, `vibration.png`, `tools.png` and
-`settings.png`. Keep filenames stable when renewing the images and inspect the
-rendered Markdown after replacement.
+display width. The user guide also includes `profiles.png`, `tester-input.png`,
+`sticks.png`, `triggers.png`, `macros.png`, `turbo.png`, `vibration.png`,
+`tools.png` and `settings.png`. Keep filenames stable when renewing the images
+and inspect the rendered Markdown after replacement.

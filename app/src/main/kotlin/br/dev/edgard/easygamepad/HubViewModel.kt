@@ -81,6 +81,8 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(viewModelScope, SharingStarted.Eagerly, DraftStatusKind.CLEAN)
     val tab = MutableStateFlow(0)
     val profileSection = MutableStateFlow(0)
+    /** When false, the Profiles tab shows the saved-profile list; when true, the section editor. */
+    val profileEditorOpen = MutableStateFlow(false)
     val connectionSheet = MutableStateFlow(false)
     val hardware = repository.state
     val keyLinker = app.keyLinker.state
@@ -420,11 +422,13 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     fun load(config: ControllerConfig) {
         replaceEditorDraft(config, null)
         drafts.adoptBaseline(editorWorkspaceKey(), config, null)
+        profileEditorOpen.value = true
         tab.value = 1
     }
     fun loadSaved(profile: SavedProfile) {
         replaceEditorDraft(profile.config, profile.id)
         drafts.adoptBaseline(editorWorkspaceKey(), profile.config, profile.id)
+        profileEditorOpen.value = true
         tab.value = 1
     }
     fun clearSavedProfileLink() {
@@ -568,11 +572,20 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     fun clearKeyLinkerPreview() = app.keyLinker.clearPreview()
     /** Sends the reviewed write when X20CTL's evidence allows it, then confirms it by reading it back. */
     fun sendKeyLinker() { if (keyLinkerTarget()) app.keyLinker.sendPreviewAsync() }
+    fun openProfilesEditor() { profileEditorOpen.value = true }
+    fun closeProfilesEditor() { profileEditorOpen.value = false }
     fun customize(section: Int = 0) {
         val device = selectedDevice.value
-        if (device?.supportsKeyLinker == true) { profileSection.value = section.coerceIn(0, 5); tab.value = 1; return }
+        if (device?.supportsKeyLinker == true) {
+            profileSection.value = section.coerceIn(0, 5)
+            profileEditorOpen.value = false
+            tab.value = 1
+            return
+        }
         if (device?.supportsConfiguration != true) { tab.value = 2; return }
-        profileSection.value = section.coerceIn(0, 5); tab.value = 1
+        profileSection.value = section.coerceIn(0, 5)
+        profileEditorOpen.value = true
+        tab.value = 1
     }
     fun connectSelected() {
         val target = selectedDevice.value ?: return
@@ -601,9 +614,28 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
     fun readVersions() { if (configurationTarget()) viewModelScope.launch { repository.readVersions() } }
     fun apply(snapshot: ControllerConfig = draft.value) {
         stopActiveVibrationPreview()
-        if (!configurationTarget()) return
+        if (!configurationTarget()) {
+            repository.notice(
+                "Connect the selected controller in configuration mode to apply.",
+                "Conecte o controle selecionado no modo de configuração para aplicar.",
+                true,
+            )
+            return
+        }
         val binding = captureOperationBinding() ?: return
         viewModelScope.launch { repository.apply(snapshot, binding, ::stillBoundToOperation) }
+    }
+    /** Writes a saved on-phone profile to the controller without replacing the active draft. */
+    fun applySavedProfile(profile: SavedProfile) {
+        if (profile.config.profileValidationIssues().isNotEmpty()) {
+            repository.notice(
+                "Fix this saved profile in the editor before applying it.",
+                "Corrija este perfil salvo no editor antes de aplicá-lo.",
+                true,
+            )
+            return
+        }
+        apply(profile.config)
     }
     fun save() = saveAsNewCopy()
     fun updateSavedCopy() {
@@ -666,6 +698,7 @@ class HubViewModel(application: Application) : AndroidViewModel(application) {
             if (origin != null && !origin.matchesActive(editorGeneration, editorWorkspaceKey())) return@onSuccess
             replaceEditorDraft(imported, null)
             drafts.adoptBaseline(editorWorkspaceKey(), imported, null)
+            profileEditorOpen.value = true
             tab.value = 1
             repository.notice(
                 "Profile imported. Save it or apply it to your controller when ready.",

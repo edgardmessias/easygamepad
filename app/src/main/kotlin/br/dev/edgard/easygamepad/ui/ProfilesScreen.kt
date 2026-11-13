@@ -5,7 +5,6 @@ package br.dev.edgard.easygamepad.ui
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -30,9 +29,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -70,11 +68,11 @@ import kotlinx.coroutines.withContext
     val canTestX10Vibration by model.canTestX10Vibration.collectAsStateWithLifecycle()
     val x10VibrationPreview by model.x10VibrationPreview.collectAsStateWithLifecycle()
     val link by model.link.collectAsStateWithLifecycle()
+    val switching by model.switching.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val imeVisible = WindowInsets.ime.getBottom(density) > 0
-    val largeText = density.fontScale >= 1.3f
     val reducedMotion = rememberReducedMotion()
     val section by model.profileSection.collectAsStateWithLifecycle()
     val savedProfileId by model.savedProfileId.collectAsStateWithLifecycle()
@@ -106,16 +104,17 @@ import kotlinx.coroutines.withContext
     val sectionLabels = listOf(tr("Buttons", "Botões"), tr("Sticks", "Analógicos"), tr("Triggers", "Gatilhos"), tr("Macros", "Macros"), tr("Turbo", "Turbo"), tr("Vibration", "Vibração"))
     DisposableEffect(Unit) { onDispose { model.cancelX10VibrationPreview() } }
     LaunchedEffect(section) { profileScroll.scrollTo(0); actionsCollapsed = false }
-    var savedVisible by rememberSaveable { mutableStateOf(false) }
+    val editorOpen by model.profileEditorOpen.collectAsStateWithLifecycle()
     var editingName by rememberSaveable { mutableStateOf(false) }
     var menuVisible by remember { mutableStateOf(false) }
     var rear by rememberSaveable { mutableStateOf(false) }
-    var showAllButtons by rememberSaveable { mutableStateOf(false) }
     var keyPicker by remember { mutableStateOf<PadKey?>(null) }
     var applySnapshot by remember { mutableStateOf<ControllerConfig?>(null) }
+    var applySavedDialog by remember { mutableStateOf<SavedProfile?>(null) }
     var readDialog by remember { mutableStateOf(false) }
     var loadDialog by remember { mutableStateOf<SavedProfile?>(null) }
-    var deleteDialog by remember { mutableStateOf<String?>(null) }
+    var deleteDialog by remember { mutableStateOf<SavedProfile?>(null) }
+    var importDialog by remember { mutableStateOf(false) }
     var rearMapOverMacro by remember { mutableStateOf<RearRemapOverMacroPending?>(null) }
     var pendingMacroReplace by remember { mutableStateOf<RearMacroReplacePending?>(null) }
     val editorConfirmGeneration = remember(draft, savedProfileId) { model.captureEditorConfirmBinding() }
@@ -138,7 +137,9 @@ import kotlinx.coroutines.withContext
     var exportSnapshot by remember { mutableStateOf<ControllerConfig?>(null) }
     val validationIssues = remember(draft) { draft.profileValidationIssues() }
     val draftValid = validationIssues.isEmpty()
-    val editorUi = profilesEditorUiState(link.phase, hardware.busy, hardware.calibration, draftValid)
+    val editorUi = profilesEditorUiState(
+        selected, link.phase, link.address, link.protocol, switching, hardware.busy, hardware.calibration, draftValid,
+    )
     val canSaveCurrent = editorUi.canSaveProfile && (savedProfileId != null || canSaveNewCopy)
     val saveCurrent: () -> Unit = { if (savedProfileId != null) model.updateSavedCopy() else model.saveAsNewCopy() }
     val draftStatusLabel = when (draftStatus) {
@@ -148,9 +149,9 @@ import kotlinx.coroutines.withContext
         DraftStatusKind.CLEAN -> tr("Ready to edit", "Pronto para editar")
     }
     val moreActionsLabel = tr("More profile actions", "Mais ações do perfil")
-    val savedProfilesLabel = ConsumerCopy.savedProfileQuota(prefs.profiles.size, portuguese = LocalPortuguese.current)
     val editNameLabel = tr("Edit profile name: ", "Editar nome do perfil: ") + draft.name
-    BackHandler(savedVisible) { savedVisible = false }
+    val listBackLabel = tr("Back to saved profiles", "Voltar aos perfis salvos")
+    BackHandler(editorOpen) { model.closeProfilesEditor() }
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         val snapshot = exportSnapshot
         if (uri != null && snapshot != null) scope.launch {
@@ -173,9 +174,36 @@ import kotlinx.coroutines.withContext
                 .onFailure { model.repository.notice("Could not read this profile file", "Não foi possível ler este arquivo de perfil", true) }
         }
     }
-    if (savedVisible) {
-        SavedProfilesScreen(prefs.profiles, savedProfileId, { savedVisible = false },
-            onLoad = { loadDialog = it }, onDelete = { deleteDialog = it.id })
+    if (!editorOpen) {
+        Column(Modifier.fillMaxSize()) {
+            if (DemoController.isDevice(selected)) SimulatedControllerBanner()
+            ProfilesListScreen(
+                profiles = prefs.profiles,
+                editingId = savedProfileId,
+                draftName = draft.name,
+                draftStatusLabel = draftStatusLabel,
+                showDraftRow = savedProfileId == null,
+                canReadFromDevice = editorUi.canReadFromDevice,
+                readDisabledReason = AccessibilitySemantics.profilesReadDisabledReason(editorUi, LocalPortuguese.current),
+                onEditDraft = model::openProfilesEditor,
+                onEditSaved = { model.openProfilesEditor() },
+                onLoad = { profile ->
+                    if (draftStatus == DraftStatusKind.UNSAVED_CHANGES || draftStatus == DraftStatusKind.NEW) {
+                        loadDialog = profile
+                    } else {
+                        model.loadSaved(profile)
+                    }
+                },
+                onApply = { applySavedDialog = it },
+                onDelete = { deleteDialog = it },
+                onExport = { profile ->
+                    exportSnapshot = profile.config
+                    export.launch("${profile.config.name.ifBlank { "profile" }}.json")
+                },
+                onReadFromController = { readDialog = true },
+                onImport = { importDialog = true },
+            )
+        }
     } else {
         Column(Modifier.fillMaxSize().imePadding()) {
             if (DemoController.isDevice(selected)) {
@@ -183,6 +211,9 @@ import kotlinx.coroutines.withContext
             }
             Row(Modifier.fillMaxWidth().padding(start = ScreenLayout.horizontalPadding, end = 8.dp, top = 4.dp),
                 verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = model::closeProfilesEditor, modifier = Modifier.semantics { contentDescription = listBackLabel }) {
+                    HubIcon(Glyph.ARROW, Modifier.size(20.dp).rotate(180f), MaterialTheme.colorScheme.onSurface)
+                }
                 TextButton(onClick = { editingName = !editingName }, modifier = Modifier.weight(1f).heightIn(min = 48.dp).semantics {
                     contentDescription = editNameLabel
                     stateDescription = draftStatusLabel
@@ -196,15 +227,7 @@ import kotlinx.coroutines.withContext
                             color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
-                TextButton(onClick = { savedVisible = true }, modifier = Modifier.heightIn(min = 48.dp).semantics {
-                    contentDescription = savedProfilesLabel
-                },
-                    contentPadding = PaddingValues(horizontal = 8.dp)) {
-                    HubIcon(Glyph.PROFILES, Modifier.size(18.dp), MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(if (largeText) 4.dp else 6.dp))
-                    Text((if (largeText) "" else tr("Saved ", "Salvos ")) + prefs.profiles.size, maxLines = 1)
-                }
-                Box {
+                Box(Modifier.padding(end = 4.dp)) {
                     IconButton(onClick = { menuVisible = true }, modifier = Modifier.semantics {
                         contentDescription = moreActionsLabel
                     }) { Text("⋮", style = MaterialTheme.typography.titleLarge) }
@@ -223,7 +246,7 @@ import kotlinx.coroutines.withContext
                         DropdownMenuItem(text = { Text(ConsumerCopy.readFromX10Action(LocalPortuguese.current)) },
                             enabled = editorUi.canReadFromDevice, onClick = { menuVisible = false; readDialog = true })
                         DropdownMenuItem(text = { Text(tr("Import profile from a file", "Importar perfil de um arquivo")) },
-                            onClick = { menuVisible = false; import.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) })
+                            onClick = { menuVisible = false; importDialog = true })
                         DropdownMenuItem(text = { Text(tr("Export profile", "Exportar perfil")) },
                             enabled = editorUi.canSaveProfile,
                             onClick = { menuVisible = false; exportSnapshot = draft; export.launch("easygamepad-profile.json") })
@@ -236,17 +259,19 @@ import kotlinx.coroutines.withContext
                 isError = validationIssues.any { it.field == ProfileField.NAME },
                 supportingText = validationIssues.firstOrNull { it.field == ProfileField.NAME }?.localizedMessage()?.let { { Text(it) } })
             if (hardware.busy) LinearProgressIndicator(progress = { hardware.progress }, modifier = Modifier.fillMaxWidth())
+            EditorConfigurationChannelRow(
+                phase = link.phase,
+                linkError = link.error,
+                switching = switching,
+                operationBusy = hardware.busy,
+                onConnect = model::connectSelected,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = ScreenLayout.horizontalPadding),
+            )
             Row(Modifier.fillMaxWidth().padding(horizontal = ScreenLayout.horizontalPadding),
                 verticalAlignment = Alignment.CenterVertically) {
-                ProfileEditorSectionNav(sectionLabels, section, { model.profileSection.value = it }, Modifier.weight(1f))
-                if (link.phase != LinkPhase.READY) {
-                    val connectLabel = tr("Connect to apply", "Conectar para aplicar")
-                    TextButton(onClick = model::connectSelected, modifier = Modifier.heightIn(min = 48.dp).semantics {
-                        contentDescription = connectLabel
-                    }, contentPadding = PaddingValues(horizontal = 4.dp)) {
-                        Text(tr("Connect", "Conectar"))
-                    }
-                }
+                ProfileEditorSectionNav(sectionLabels, section, { model.profileSection.value = it }, Modifier.fillMaxWidth())
             }
             Box(Modifier.weight(1f).nestedScroll(editorScrollConnection)) {
             ScreenColumn(scrollState = profileScroll) {
@@ -254,93 +279,58 @@ import kotlinx.coroutines.withContext
                 hardware.settingsReadAt?.let { Description(tr("Last read from controller: ", "Última leitura do controle: ") + timeLabel(it)) }
         when (section) {
             0 -> {
-                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Eyebrow(tr("Tap to edit", "Toque para editar"), color = MaterialTheme.colorScheme.primary)
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            FilterChip(!rear, { rear = false }, label = { Text(tr("Front", "Frente")) })
-                            FilterChip(rear, { rear = true }, label = { Text(tr("Back", "Traseira")) })
-                        }
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        FilterChip(!rear, { rear = false }, label = { Text(tr("Front", "Frente")) })
+                        Spacer(Modifier.width(8.dp))
+                        FilterChip(rear, { rear = true }, label = { Text(tr("Back", "Traseira")) })
                     }
-                    if (!rear) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(PadKey.LB, PadKey.LT, PadKey.RT, PadKey.RB).forEach { source ->
-                            OutlinedButton(onClick = { keyPicker = source }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(6.dp)) {
-                                Text(source.label + (draft.mappings[source]?.takeIf { it != source }?.let { " → ${it.label}" } ?: ""),
-                                    maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
-                            }
-                        }
-                    }
-                    ControllerStage(Modifier.fillMaxWidth().then(if (LocalWindowLayout.current.shortHeight) Modifier.height(220.dp) else Modifier.aspectRatio(1.65f)), artwork = ControllerArtworkCatalog.X10, rear = rear, mappings = draft.mappings, onPick = { keyPicker = it })
-                    ProfileHelp(tr("How button mapping works", "Como funcionam os botões"),
-                        tr("Tap a button to choose its function. Highlights show your custom assignments.",
-                            "Toque em um botão para escolher sua função. Os destaques mostram suas alterações."))
+                    ControllerStage(
+                        Modifier.fillMaxWidth().then(profileEditorControllerStageModifier(shortHeight = true)),
+                        artwork = ControllerArtworkCatalog.X10,
+                        rear = rear,
+                        mappings = draft.mappings,
+                        onPick = { keyPicker = it },
+                    )
+                    Text(
+                        tr("Tap a button to edit", "Toque em um botão para editar"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
-                TextButton(onClick = { showAllButtons = !showAllButtons }) {
-                    Text(if (showAllButtons) tr("Hide button list", "Ocultar lista de botões") else tr("Show button list", "Ver lista de botões"))
+                TextButton(
+                    onClick = { model.edit { it.copy(mappings = it.mappings + PadKey.outputs.associateWith { key -> key }) } },
+                    modifier = Modifier.heightIn(min = 48.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp),
+                ) {
+                    Text(tr("Restore default button functions", "Restaurar funções originais dos botões"))
                 }
-                if (showAllButtons) {
-                HubCard(Modifier.fillMaxWidth()) {
-                    (PadKey.outputs + listOf(PadKey.M1, PadKey.M2) + listOf(PadKey.M3, PadKey.M4).filter { it in draft.mappings }).chunked(2).forEach { pair ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            pair.forEach { source ->
-                                val target = draft.mappings[source]
-                                val outputKind = draft.buttonsListOutputKind(source)
-                                Surface(onClick = { keyPicker = source }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(source.label, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                            HubIcon(Glyph.EDIT, Modifier.size(13.dp), MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            HubIcon(Glyph.ARROW, Modifier.size(14.dp), MaterialTheme.colorScheme.onSurfaceVariant)
-                                            Text(
-                                                when (outputKind) {
-                                                    ButtonsListOutputKind.Disabled -> tr("Disabled", "Desativado")
-                                                    ButtonsListOutputKind.Mapping -> requireNotNull(target).label
-                                                    ButtonsListOutputKind.Macro -> tr("Macro", "Macro")
-                                                    ButtonsListOutputKind.NotSent -> if (source in DeviceProfile.X10.rearButtons) {
-                                                        tr("Unchanged", "Inalterado")
-                                                    } else {
-                                                        tr("Not sent", "Não enviado")
-                                                    }
-                                                },
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                style = MaterialTheme.typography.labelLarge,
-                                                color = when (outputKind) {
-                                                    ButtonsListOutputKind.Disabled -> MaterialTheme.colorScheme.error
-                                                    ButtonsListOutputKind.Mapping ->
-                                                        if (target != source) MaterialTheme.colorScheme.primary
-                                                        else MaterialTheme.colorScheme.onSurfaceVariant
-                                                    ButtonsListOutputKind.Macro -> MaterialTheme.colorScheme.primary
-                                                    ButtonsListOutputKind.NotSent -> MaterialTheme.colorScheme.onSurfaceVariant
-                                                },
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                }
-                TextButton(onClick = { model.edit { it.copy(mappings = it.mappings + PadKey.outputs.associateWith { key -> key }) } }) { Text(tr("Restore default button functions", "Restaurar funções originais dos botões")) }
-                ProfileHelp(tr("About missing assignments", "Sobre atribuições ausentes"),
+                ProfileButtonMappingList(draft, onPick = { keyPicker = it })
+                ProfileHelp(tr("How button mapping works", "Como funcionam os botões"),
                     tr(
-                        "Face buttons you do not change here are not sent and do not erase the controller. Rear paddles (M1/M2) shown as unchanged are not sent either—the controller keeps its current setup. Disabled paddles are sent so the paddle does nothing.",
-                        "Botões da frente que você não altera aqui não são enviados e não apagam o controle. Paddles traseiros (M1/M2) marcados como inalterados também não são enviados — o controle mantém a configuração atual. Paddles desativados são enviados para o botão não fazer nada.",
+                        "Tap the diagram or a row to map a button. Scroll to reach every control, including shoulders. Restoring defaults affects front buttons only.",
+                        "Toque no diagrama ou em uma linha para mapear. Role para alcançar todos os controles, inclusive ombros. Restaurar padrões afeta só a face frontal.",
                     ))
             }
             1 -> {
-                StickEditor(tr("Left stick", "Analógico esquerdo"), draft.leftStick) { value -> model.edit { it.copy(leftStick = value) } }
-                StickEditor(tr("Right stick", "Analógico direito"), draft.rightStick) { value -> model.edit { it.copy(rightStick = value) } }
+                SticksPairEditor(draft.leftStick, draft.rightStick,
+                    onLeft = { value -> model.edit { it.copy(leftStick = value) } },
+                    onRight = { value -> model.edit { it.copy(rightStick = value) } },
+                )
                 ProfileHelp(tr("About stick response", "Sobre a resposta dos analógicos"),
                     tr("Reduce unwanted movement near the center or choose how far you move the stick to reach full speed.",
                         "Reduza movimentos involuntários perto do centro ou escolha quanto mover o analógico para atingir a velocidade máxima."))
             }
             2 -> {
-                HubCard(Modifier.fillMaxWidth()) { Text("LT", style = MaterialTheme.typography.titleLarge); RangeEditor(draft.leftTrigger.min, draft.leftTrigger.max) { min, max -> model.edit { it.copy(leftTrigger = TriggerSettings(min, max)) } } }
-                HubCard(Modifier.fillMaxWidth()) { Text("RT", style = MaterialTheme.typography.titleLarge); RangeEditor(draft.rightTrigger.min, draft.rightTrigger.max) { min, max -> model.edit { it.copy(rightTrigger = TriggerSettings(min, max)) } } }
+                TriggersPairEditor(draft.leftTrigger, draft.rightTrigger,
+                    onLeft = { value -> model.edit { it.copy(leftTrigger = value) } },
+                    onRight = { value -> model.edit { it.copy(rightTrigger = value) } },
+                )
                 ProfileHelp(tr("About trigger response", "Sobre a resposta dos gatilhos"),
                     tr("Choose where each trigger begins responding and reaches full output.",
                         "Escolha onde cada gatilho começa a responder e atinge o valor máximo."))
@@ -353,42 +343,41 @@ import kotlinx.coroutines.withContext
                 }
             }
             4 -> TurboEditor(draft.turbos) { value -> model.edit { it.copy(turbos = value) } }
-            else -> HubCard(Modifier.fillMaxWidth()) {
-                Text(tr("Feel every moment.", "Sinta cada momento."), style = MaterialTheme.typography.titleLarge)
-                ValueSlider(tr("Left motor", "Motor esquerdo"), draft.leftVibration, 0..100, "%",
-                    previewing = x10VibrationPreview.busy(X10Motor.LEFT),
-                    exactInput = true,
-                    onChange = { value -> model.edit { it.copy(leftVibration = value) } },
-                    onSliderChange = model::setLeftVibration,
-                    onChangeFinished = model::finishLeftVibrationPreview)
-                ValueSlider(tr("Right motor", "Motor direito"), draft.rightVibration, 0..100, "%",
-                    previewing = x10VibrationPreview.busy(X10Motor.RIGHT),
-                    exactInput = true,
-                    onChange = { value -> model.edit { it.copy(rightVibration = value) } },
-                    onSliderChange = model::setRightVibration,
-                    onChangeFinished = model::finishRightVibrationPreview)
-                ProfileHelp(tr("About motor intensity", "Sobre a intensidade dos motores"),
-                    tr("Set the intensity of each controller motor. Availability depends on the controller's operating mode.",
-                        "Ajuste a intensidade de cada motor do controle. A disponibilidade depende do modo de operação."))
-                ProfileHelp(tr("Previewing vibration", "Prévia da vibração"),
-                    tr("While the X10 configuration channel is ready, hold and drag a slider to feel that motor at the chosen intensity. Release the slider to stop. Nothing is saved until you apply the profile. If vibration continues after release, turn the controller off.",
-                        "Com o canal de configuração do X10 pronto, mantenha e arraste um controle para sentir aquele motor na intensidade escolhida. Solte para parar. Nada é gravado até você aplicar o perfil. Se continuar vibrando após soltar, desligue o controle."))
-                if (!canTestX10Vibration) Description(tr("Connect the X10 configuration channel and finish any active operation to preview motor intensity on the controller.",
-                    "Conecte o canal de configuração do X10 e conclua qualquer operação em andamento para pré-visualizar a intensidade dos motores no controle."))
-                OutlinedButton(onClick = model::rumble, enabled = vibrationTestAvailability == GamepadVibrationAvailability.AVAILABLE) {
+            else -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                HubCard(Modifier.fillMaxWidth()) {
+                    Text(tr("Motor intensity", "Intensidade dos motores"), style = MaterialTheme.typography.titleMedium)
+                    ValueSlider(tr("Left motor", "Motor esquerdo"), draft.leftVibration, 0..100, "%",
+                        previewing = x10VibrationPreview.busy(X10Motor.LEFT),
+                        exactInput = true,
+                        onChange = { value -> model.edit { it.copy(leftVibration = value) } },
+                        onSliderChange = model::setLeftVibration,
+                        onChangeFinished = model::finishLeftVibrationPreview)
+                    ValueSlider(tr("Right motor", "Motor direito"), draft.rightVibration, 0..100, "%",
+                        previewing = x10VibrationPreview.busy(X10Motor.RIGHT),
+                        exactInput = true,
+                        onChange = { value -> model.edit { it.copy(rightVibration = value) } },
+                        onSliderChange = model::setRightVibration,
+                        onChangeFinished = model::finishRightVibrationPreview)
+                    if (!canTestX10Vibration) {
+                        Text(
+                            tr("X10 motor preview needs the configuration channel ready.", "Prévia dos motores X10 exige o canal de configuração pronto."),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                OutlinedButton(
+                    onClick = model::rumble,
+                    enabled = vibrationTestAvailability == GamepadVibrationAvailability.AVAILABLE,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) {
                     Text(tr("Test Android gamepad vibration", "Testar vibração do controle no Android"))
                 }
-                ProfileHelp(tr("About the Android vibration test", "Sobre o teste de vibração no Android"), when (vibrationTestAvailability) {
-                    GamepadVibrationAvailability.NO_DEVICE -> tr(
-                        "Connect and select the gameplay controller to test vibration. The app configuration connection alone is not enough.",
-                        "Conecte e selecione o controle para jogar antes de testar a vibração. Apenas a conexão de configuração com o app não é suficiente.")
-                    GamepadVibrationAvailability.UNSUPPORTED -> tr(
-                        "Android does not expose vibration for this controller in its current connection mode. Use the X10 sliders above through its configuration connection.",
-                        "O Android não disponibiliza vibração para este controle no modo de conexão atual. Use os controles deslizantes do X10 acima pela conexão de configuração.")
-                    GamepadVibrationAvailability.AVAILABLE -> tr(
-                        "Plays a short pulse on the selected gamepad using Android. It does not preview this draft's motor intensities.",
-                        "Aciona um pulso curto no controle selecionado usando o Android. O teste não reproduz as intensidades dos motores deste rascunho.")
-                })
+                ProfileHelp(tr("Vibration help", "Ajuda sobre vibração"),
+                    tr(
+                        "Slide to set each motor; with the configuration channel ready, hold to preview on the controller. The Android test uses the gamepad input channel only—it does not follow draft intensities.",
+                        "Ajuste cada motor; com o canal de configuração pronto, segure para pré-visualizar no controle. O teste Android usa só a entrada de jogo—não segue as intensidades do rascunho.",
+                    ))
             }
         }
         hardware.applyResult?.let { result ->
@@ -397,6 +386,7 @@ import kotlinx.coroutines.withContext
                 onReadFromDevice = { readDialog = true },
             )
         }
+                Spacer(Modifier.height(profileEditorFooterClearance))
             }
             }
             AnimatedVisibility(
@@ -484,20 +474,66 @@ import kotlinx.coroutines.withContext
             )
         }
     }
-    if (readDialog) ConfirmDialog(tr("Read current settings?", "Ler configurações atuais?"),
-        tr("Replace the profile you are editing with the settings on your X10? Save first if you want to keep your edits. The profile name is kept; rear paddles come from onboard macro slots.",
-            "Substituir o perfil em edição pelos ajustes do seu X10? Salve antes se quiser guardar suas alterações. O nome do perfil é mantido; paddles traseiros vêm dos slots de macro do controle."),
-        ConsumerCopy.readFromX10Action(LocalPortuguese.current), { readDialog = false }) { readDialog = false; model.readController() }
+    if (readDialog) {
+        val readBody = if (DemoController.isDevice(selected)) {
+            tr(
+                "Replace the profile you are editing with the simulator’s current settings? Save first if you want to keep your edits. Nothing is read from a physical controller.",
+                "Substituir o perfil em edição pelos ajustes atuais do simulador? Salve antes se quiser guardar suas alterações. Nada é lido de um controle físico.",
+            )
+        } else {
+            tr(
+                "Replace the profile you are editing with the settings on your X10? Save first if you want to keep your edits. The profile name is kept; rear paddles come from onboard macro slots.",
+                "Substituir o perfil em edição pelos ajustes do seu X10? Salve antes se quiser guardar suas alterações. O nome do perfil é mantido; paddles traseiros vêm dos slots de macro do controle.",
+            )
+        }
+        ConfirmDialog(tr("Read current settings?", "Ler configurações atuais?"), readBody,
+            ConsumerCopy.readFromX10Action(LocalPortuguese.current), { readDialog = false }) {
+            readDialog = false; model.readController()
+        }
+    }
+    if (importDialog) {
+        ConfirmDialog(
+            tr("Import profile?", "Importar perfil?"),
+            tr(
+                "This replaces the profile you are editing. Save first if you want to keep your changes.",
+                "Isso substitui o perfil em edição. Salve antes se quiser guardar suas alterações.",
+            ),
+            tr("Import", "Importar"),
+            onDismiss = { importDialog = false },
+            onConfirm = {
+                importDialog = false
+                import.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
+            },
+        )
+    }
     applySnapshot?.let { snapshot ->
-        X10ApplyDialog(snapshot, editorUi.configurationReady,
+        val simulated = DemoController.isDevice(selected)
+        X10ApplyDialog(snapshot, editorUi.canApplyToDevice, simulated,
             dismiss = { applySnapshot = null }, apply = { applySnapshot = null; model.apply(snapshot) })
+    }
+    applySavedDialog?.let { saved ->
+        val simulated = DemoController.isDevice(selected)
+        X10ApplyDialog(savedProfileApplySnapshot(saved), editorUi.configurationReady, simulated,
+            dismiss = { applySavedDialog = null },
+            apply = { applySavedDialog = null; model.applySavedProfile(saved) },
+        )
     }
     loadDialog?.let { saved ->
         ConfirmDialog(tr("Load profile?", "Carregar perfil?"), tr("This replaces the profile you are editing. Save first if you want to keep your changes.", "Isso substitui o perfil em edição. Salve antes se quiser guardar suas alterações."), tr("Load", "Carregar"), { loadDialog = null }) {
-            model.loadSaved(saved); loadDialog = null; savedVisible = false
+            model.loadSaved(saved); loadDialog = null
         }
     }
-    deleteDialog?.let { id -> ConfirmDialog(tr("Delete saved profile?", "Excluir perfil salvo?"), tr("The saved copy will be removed from this phone.", "A cópia salva será removida deste celular."), tr("Delete", "Excluir"), { deleteDialog = null }) { model.delete(id); deleteDialog = null } }
+    deleteDialog?.let { saved ->
+        ConfirmDialog(
+            tr("Delete saved profile?", "Excluir perfil salvo?"),
+            tr(
+                "The saved copy \"${saved.config.name}\" will be removed from this phone.",
+                "A cópia salva \"${saved.config.name}\" será removida deste celular.",
+            ),
+            tr("Delete", "Excluir"),
+            { deleteDialog = null },
+        ) { model.delete(saved.id); deleteDialog = null }
+    }
 }
 
 @Composable fun ConfirmDialog(title: String, body: String, action: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
@@ -609,43 +645,8 @@ import kotlinx.coroutines.withContext
     )
 }
 
-@Composable fun RangeEditor(min: Int, max: Int, change: (Int, Int) -> Unit) {
-    ResponseCurve(min, max)
-    ValueSlider(tr("Ignore movement up to", "Ignorar movimentos até"), min, 0..(max - 1), "%", exactInput = true) { change(it, max) }
-    ValueSlider(tr("Reach maximum at", "Atingir o máximo em"), max, (min + 1)..100, "%", exactInput = true) { change(min, it) }
-}
-
-@Composable private fun ResponseCurve(min: Int, max: Int) {
-    val color = MaterialTheme.colorScheme.primary
-    val grid = MaterialTheme.colorScheme.outlineVariant
-    val label = tr("Response: ignore the first $min%, reach full output at $max%.", "Resposta: ignora os primeiros $min% e atinge o máximo em $max%.")
-    Canvas(Modifier.fillMaxWidth().height(90.dp).semantics { contentDescription = label }) {
-        val inset = 8.dp.toPx(); val w = size.width - 2 * inset; val h = size.height - 2 * inset
-        for (step in 0..4) {
-            val t = step / 4f
-            drawLine(grid, Offset(inset + w * t, inset), Offset(inset + w * t, inset + h))
-            drawLine(grid, Offset(inset, inset + h * t), Offset(inset + w, inset + h * t))
-        }
-        val path = Path().apply {
-            moveTo(inset, inset + h); lineTo(inset + w * min / 100f, inset + h)
-            lineTo(inset + w * max / 100f, inset); lineTo(inset + w, inset)
-        }
-        drawPath(path, color, style = Stroke(2.dp.toPx()))
-        drawCircle(color, 4.dp.toPx(), Offset(inset + w * min / 100f, inset + h))
-        drawCircle(color, 4.dp.toPx(), Offset(inset + w * max / 100f, inset))
-    }
-    Description(tr("Movement → response", "Movimento → resposta"))
-}
 @Composable fun ToggleRow(title: String, checked: Boolean, change: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium); Switch(checked, change) }
-}
-@Composable private fun StickEditor(title: String, value: StickSettings, change: (StickSettings) -> Unit) {
-    HubCard(Modifier.fillMaxWidth()) {
-        Text(title, style = MaterialTheme.typography.titleLarge)
-        RangeEditor(value.min, value.max) { min, max -> change(value.copy(min = min, max = max)) }
-        ToggleRow(tr("Reverse left and right", "Trocar esquerda e direita"), value.invertX) { change(value.copy(invertX = it)) }
-        ToggleRow(tr("Reverse up and down", "Trocar cima e baixo"), value.invertY) { change(value.copy(invertY = it)) }
-    }
 }
 
 @Composable private fun ExactValueField(value: Int, range: IntRange, suffix: String, modifier: Modifier, change: (Int) -> Unit) {

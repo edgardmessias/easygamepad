@@ -8,7 +8,7 @@ For the **EasySMX X10**, it also connects to the controller's separate
 controller settings.
 
 <p align="center">
-  <img src="docs/images/dashboard.png" width="240" alt="EasyGamepad home with an X10 connected for gameplay and configuration, showing its battery level">
+  <img src="docs/images/dashboard.png" width="240" alt="EasyGamepad home with a saved EasySMX X10 and front view of the controller">
   <img src="docs/images/buttons.png" width="240" alt="X10 button editor with front and back views and separate Save profile and Apply to X10 actions">
   <img src="docs/images/tester.png" width="240" alt="Live X10 input tester with button feedback and stick plots">
 </p>
@@ -37,8 +37,9 @@ Other EasySMX models do not automatically share that support.
 2. Connect your controller to Android through Bluetooth or USB for input testing.
 3. For X10 settings and battery, add an **EasySMX X10** in the controller picker
    and connect its configuration peripheral. Grant the requested Bluetooth permissions.
-4. Edit a setup in **Profiles**. **Save profile** keeps a phone copy;
-   **Apply to X10** sends it to the controller.
+4. Open **Profiles**, choose the draft or a saved copy to edit, then
+   **Save profile** to keep a phone copy or **Apply to X10** to send settings
+   to the controller.
 
 Gameplay and configuration are separate connections. If the tester works but
 battery and settings are unavailable, check the configuration connection. QMacro
