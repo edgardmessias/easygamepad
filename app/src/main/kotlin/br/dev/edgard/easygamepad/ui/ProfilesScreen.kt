@@ -174,6 +174,13 @@ import kotlinx.coroutines.withContext
                 .onFailure { model.repository.notice("Could not read this profile file", "Não foi possível ler este arquivo de perfil", true) }
         }
     }
+    val portuguese = LocalPortuguese.current
+    val profilesListChannelStatus = profilesListConfigurationChannelStatus(editorUi, link.error, portuguese)
+    val profilesListChannelVisible = profilesListConfigurationRowVisible(
+        supportsConfiguration = selected?.supportsConfiguration == true,
+        editorUi = editorUi,
+        linkError = link.error,
+    )
     if (!editorOpen) {
         Column(Modifier.fillMaxSize()) {
             if (DemoController.isDevice(selected)) SimulatedControllerBanner()
@@ -184,7 +191,11 @@ import kotlinx.coroutines.withContext
                 draftStatusLabel = draftStatusLabel,
                 showDraftRow = savedProfileId == null,
                 canReadFromDevice = editorUi.canReadFromDevice,
-                readDisabledReason = AccessibilitySemantics.profilesReadDisabledReason(editorUi, LocalPortuguese.current),
+                readDisabledReason = AccessibilitySemantics.profilesReadDisabledReason(editorUi, portuguese),
+                configurationChannelStatus = profilesListChannelStatus,
+                configurationConnectEnabled = profilesListConnectEnabled(editorUi, switching),
+                showConfigurationChannelRow = profilesListChannelVisible,
+                onConnectConfiguration = model::connectSelected,
                 onEditDraft = model::openProfilesEditor,
                 onEditSaved = { model.openProfilesEditor() },
                 onLoad = { profile ->

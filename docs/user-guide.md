@@ -125,6 +125,11 @@ landing screen: saved phone copies, the current draft when it is not linked to a
 saved copy, and **Read from X10** / **Import profile from a file** at the bottom.
 The copy currently being edited is highlighted.
 
+If the configuration channel is unavailable, the list shows its status and a
+**Connect** action when reconnecting is allowed. During an operation or calibration,
+it explains why **Read from X10** is unavailable instead of describing the link as
+offline.
+
 Tap a row to open the editor — the draft row always edits; a saved copy opens for
 editing when it is already loaded, otherwise it loads into the editor after
 confirmation when you have unsaved edits. **Apply** on a saved row sends that
