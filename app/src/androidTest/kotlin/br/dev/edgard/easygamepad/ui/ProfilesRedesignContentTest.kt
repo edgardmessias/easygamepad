@@ -93,7 +93,7 @@ class ProfilesRedesignContentTest {
         assertEquals(saved, deleted)
         assertEquals(saved, exported)
         assertEquals(0, edits)
-        composeRule.onNodeWithContentDescription("Edit profile: Living room").performClick()
+        composeRule.onNodeWithText("Living room", useUnmergedTree = true).performClick()
         assertEquals(1, edits)
     }
 
@@ -123,10 +123,10 @@ class ProfilesRedesignContentTest {
                 )
             }
         }
-        composeRule.onNodeWithContentDescription("Edit profile: Racing").performClick()
+        composeRule.onNodeWithText("Racing", useUnmergedTree = true).performClick()
         assertEquals(saved, loaded)
         assertEquals(1, loads)
-        composeRule.onNodeWithContentDescription("Edit profile: Racing").performTouchInput { longClick() }
+        composeRule.onNodeWithText("Racing", useUnmergedTree = true).performTouchInput { longClick() }
         assertEquals(saved, deleted)
         assertEquals(1, loads)
     }

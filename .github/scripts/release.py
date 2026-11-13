@@ -39,6 +39,32 @@ def tag_version(tag):
     return version
 
 
+def resolve_release_tag(tag):
+    tag_version(tag)
+    if "-" in tag:
+        raise ValueError("Release tag must be a stable vX.Y.Z tag.")
+    result = subprocess.run(["git", "show-ref", "--verify", "--quiet", f"refs/tags/{tag}"], check=False)
+    if result.returncode != 0:
+        raise ValueError(f"Tag {tag} does not exist.")
+
+
+def validate_release_tag(tag):
+    resolve_release_tag(tag)
+    version = tag[1:]
+    tagged_commit = subprocess.check_output(
+        ["git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"],
+        text=True,
+    ).strip()
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    if head != tagged_commit:
+        raise ValueError("Checked-out commit does not match the release tag.")
+    build_version, build_code = read_version_fields(BUILD_FILE.read_text(encoding="utf-8"))
+    if build_version != version:
+        raise ValueError(f"versionName {build_version!r} does not match tag {tag!r}.")
+    if not 1 <= build_code <= MAX_VERSION_CODE:
+        raise ValueError("versionCode is outside Android's supported range.")
+
+
 def read_version_fields(text):
     names = NAME_FIELD.findall(text)
     codes = CODE_FIELD.findall(text)
@@ -212,7 +238,7 @@ def dispatch_release(tag):
     repo = os.environ.get("GH_REPO", "").strip()
     if repo:
         command.extend(["--repo", repo])
-    command.extend(["--ref", tag])
+    command.extend(["--ref", "main", "-f", f"tag={tag}", "-f", "run_instrumentation=false"])
     result = subprocess.run(command, check=False)
     recovery = " ".join(command)
     summary = f"Commit and tag `{tag}` were pushed.\n\n"
@@ -233,6 +259,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("prepare-version").add_argument("version")
+    commands.add_parser("resolve-tag").add_argument("tag")
     commands.add_parser("validate-tag").add_argument("tag")
     commands.add_parser("restore-keystore")
     commands.add_parser("package").add_argument("tag")
@@ -242,8 +269,10 @@ def main():
     try:
         if args.command == "prepare-version":
             prepare_version(args.version)
+        elif args.command == "resolve-tag":
+            resolve_release_tag(args.tag)
         elif args.command == "validate-tag":
-            tag_version(args.tag)
+            validate_release_tag(args.tag)
         elif args.command == "restore-keystore":
             restore_keystore()
         elif args.command == "package":

@@ -152,6 +152,15 @@ class RepositoryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "commit"):
             release.package_release("v1.0.0")
 
+    def test_resolve_and_validate_tag_require_matching_checkout(self):
+        release.resolve_release_tag("v1.0.0")
+        release.validate_release_tag("v1.0.0")
+        self.git("commit", "--allow-empty", "--quiet", "-m", "Ahead of tag")
+        with self.assertRaisesRegex(ValueError, "Checked-out commit"):
+            release.validate_release_tag("v1.0.0")
+        with self.assertRaisesRegex(ValueError, "does not exist"):
+            release.resolve_release_tag("v9.9.9")
+
 
 class ReleaseNotesTests(unittest.TestCase):
     def setUp(self):
@@ -205,8 +214,15 @@ class DispatchTests(unittest.TestCase):
                     redirect_stderr(error_output):
                 with self.assertRaisesRegex(ValueError, "dispatch failed"):
                     release.dispatch_release("v1.0.0")
-            run.assert_called_once_with(["gh", "workflow", "run", "release.yml", "--ref", "v1.0.0"], check=False)
-            self.assertIn("gh workflow run release.yml --ref v1.0.0", summary.read_text())
+            run.assert_called_once_with(
+                ["gh", "workflow", "run", "release.yml", "--ref", "main",
+                 "-f", "tag=v1.0.0", "-f", "run_instrumentation=false"],
+                check=False,
+            )
+            self.assertIn(
+                "gh workflow run release.yml --ref main -f tag=v1.0.0 -f run_instrumentation=false",
+                summary.read_text(),
+            )
             self.assertIn("Keep the commit and tag", error_output.getvalue())
 
     def test_dispatch_passes_repo_when_configured(self):
@@ -220,9 +236,23 @@ class DispatchTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "dispatch failed"):
                     release.dispatch_release("v1.0.0")
             run.assert_called_once_with(
-                ["gh", "workflow", "run", "release.yml", "--repo", "owner/name", "--ref", "v1.0.0"],
+                ["gh", "workflow", "run", "release.yml", "--repo", "owner/name", "--ref", "main",
+                 "-f", "tag=v1.0.0", "-f", "run_instrumentation=false"],
                 check=False,
             )
+
+    def test_success_dispatches_existing_tag_without_instrumentation(self):
+        output = io.StringIO()
+        with patch.dict(os.environ, {}, clear=True), \
+                patch("release.subprocess.run", return_value=subprocess.CompletedProcess([], 0)) as run, \
+                patch("sys.stdout", output):
+            release.dispatch_release("v1.1.0")
+        run.assert_called_once_with(
+            ["gh", "workflow", "run", "release.yml", "--ref", "main",
+             "-f", "tag=v1.1.0", "-f", "run_instrumentation=false"],
+            check=False,
+        )
+        self.assertIn("The Release workflow was dispatched", output.getvalue())
 
 
 if __name__ == "__main__":

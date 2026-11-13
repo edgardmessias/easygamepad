@@ -5,7 +5,22 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      run_instrumentation:
+        description: 'Run connected Android instrumentation on a managed emulator'
+        type: boolean
+        default: false
   workflow_call:
+    inputs:
+      source_ref:
+        description: 'Git commit SHA to check out (defaults to the caller ref)'
+        required: false
+        type: string
+      run_instrumentation:
+        description: 'Run connected Android instrumentation on a managed emulator'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -22,6 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ inputs.source_ref || github.sha }}
           persist-credentials: false
 
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
@@ -40,7 +56,7 @@ jobs:
           python3 -B .github/scripts/check_doc_links.py
 
       - name: Run checks and assemble APKs
-        run: bash ./gradlew :protocol:test :app:lintDebug :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease --stacktrace
+        run: bash ./gradlew :protocol:test :app:lintDebug :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :app:assembleDebug :app:assembleRelease --stacktrace
 
       - name: Upload lint and test reports
         if: ${{ always() }}
@@ -55,15 +71,17 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-  # Emulator boot on ubuntu-24.04 is flaky without KVM; run manually until CI infra is fixed.
   instrumentation:
     name: Controller-free Compose UI tests
-    if: github.event_name == 'workflow_dispatch'
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.run_instrumentation) ||
+      (github.event_name == 'workflow_call' && inputs.run_instrumentation)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ inputs.source_ref || github.sha }}
           persist-credentials: false
 
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5

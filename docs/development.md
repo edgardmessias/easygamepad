@@ -265,6 +265,25 @@ Full profile-write, deletion/persistence and calibration validation remains
 incomplete. Record new evidence per operation rather than marking the whole
 controller verified from a battery read or a screenshot.
 
+## Release workflow
+
+Prepare release (on `main`) bumps `versionName` / `versionCode`, pushes an
+annotated tag and dispatches the Release workflow on `main` with that tag as an
+input. Release validates the tag,
+runs the reusable CI workflow on the **tagged commit SHA**, assembles and signs
+the APK, packages GPL corresponding source, and publishes the GitHub Release.
+
+If a tag already exists but publication failed, do **not** move or recreate the
+tag. From an up-to-date `main` workflow definition, run Release manually with
+the existing tag and leave instrumentation disabled (default):
+
+```bash
+gh workflow run release.yml --repo edgardmessias/easygamepad --ref main -f tag=v1.1.0 -f run_instrumentation=false
+```
+
+Checks always compile `androidTest` sources; connected UI tests run only when
+`run_instrumentation` is set explicitly on CI or Release dispatch.
+
 ## Documentation screenshots
 
 Capture the installed app using ADB, with **Settings → Language → English** and

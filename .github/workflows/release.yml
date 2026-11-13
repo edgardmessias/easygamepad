@@ -1,51 +1,87 @@
 name: Release
-run-name: Release ${{ github.ref_name }}
+run-name: Release ${{ inputs.tag || github.ref_name }}
 
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag (vX.Y.Z)'
+        required: true
+        type: string
+      run_instrumentation:
+        description: 'Run Compose UI instrumentation during CI checks'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   validate-tag:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    outputs:
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
+      resolved_sha: ${{ steps.resolve.outputs.resolved_sha }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Require a stable version tag
+      - name: Resolve release tag and pinned commit
+        id: resolve
         env:
-          RELEASE_REF_TYPE: ${{ github.ref_type }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          DISPATCH_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || '' }}
         run: |
-          if [[ "$RELEASE_REF_TYPE" != tag ]]; then
-            echo "::error::Run Release on an existing vX.Y.Z tag."
-            exit 1
+          set -euo pipefail
+          if [[ "${{ github.ref_type }}" == tag ]]; then
+            release_tag="${{ github.ref_name }}"
+          else
+            if [[ -z "$DISPATCH_TAG" ]]; then
+              echo "::error::Workflow dispatch requires an existing vX.Y.Z tag."
+              exit 1
+            fi
+            if [[ "${{ github.ref }}" != refs/heads/main ]]; then
+              echo "::error::Run Release manually only from the main branch."
+              exit 1
+            fi
+            release_tag="$DISPATCH_TAG"
           fi
-          python3 -B .github/scripts/release.py validate-tag "$RELEASE_TAG"
+          python3 -B .github/scripts/release.py resolve-tag "$release_tag"
+          resolved_sha="$(git rev-parse --verify "refs/tags/${release_tag}^{commit}")"
+          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
+          echo "resolved_sha=${resolved_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Check out tagged release commit
+        run: git checkout --force "${{ steps.resolve.outputs.resolved_sha }}"
+
+      - name: Validate release tag metadata
+        env:
+          RELEASE_TAG: ${{ steps.resolve.outputs.release_tag }}
+        run: python3 -B .github/scripts/release.py validate-tag "$RELEASE_TAG"
 
   checks:
     needs: validate-tag
     uses: ./.github/workflows/ci.yml
+    with:
+      source_ref: ${{ needs.validate-tag.outputs.resolved_sha }}
+      run_instrumentation: ${{ github.event_name == 'workflow_dispatch' && inputs.run_instrumentation || false }}
     permissions:
       contents: read
 
   build:
-    needs: checks
+    needs: [validate-tag, checks]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
-      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_TAG: ${{ needs.validate-tag.outputs.release_tag }}
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ vars.ANDROID_KEY_ALIAS }}
@@ -53,7 +89,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.validate-tag.outputs.resolved_sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -97,7 +133,7 @@ jobs:
         run: rm -f -- "${{ runner.temp }}/easygamepad-release.jks"
 
   publish:
-    needs: build
+    needs: [validate-tag, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -105,11 +141,11 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_TAG: ${{ needs.validate-tag.outputs.release_tag }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.validate-tag.outputs.resolved_sha }}
           fetch-depth: 0
           persist-credentials: false
 
